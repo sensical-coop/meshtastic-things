@@ -1,0 +1,105 @@
+
+services:
+  mqtt_kafka_bridge:
+    container_name: mqtt-kafka-bridge
+    build: ./meshtastic_kafka
+    depends_on:
+      - kafka
+    env_file: ".env"
+    restart: unless-stopped
+    ports:
+      - ${MQTT_BRIDGE__HEALTH__PORT}:${MQTT_BRIDGE__HEALTH__PORT}
+    command: ["mqtt_kafka_bridge"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${MQTT_BRIDGE__HEALTH__PORT}/health"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+  influxdb_writer:
+    container_name: influxdb-writer
+    build: ./meshtastic_kafka
+    depends_on:
+      - kafka
+      - influxdb
+    env_file: ".env"
+    restart: unless-stopped
+    ports:
+      - ${INFLUX__HEALTHCHECK_PORT}:${INFLUX__HEALTHCHECK_PORT}
+    command: ["kafka_influx_writer"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${INFLUX__HEALTHCHECK_PORT}/health"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+  kafka:
+    image: apache/kafka:latest
+    env_file: ".env"
+    container_name: kafka
+    hostname: kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"     # external access
+      - "9093:9093"     # controller listener
+      - "29092:29092"     # controller listener
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  kafbat-ui:
+    container_name: kafbat-ui
+    image: ghcr.io/kafbat/kafka-ui
+    ports:
+      - 8080:8080
+    environment:
+      DYNAMIC_CONFIG_ENABLED: true
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_METRICS_PORT: 9997
+    depends_on:
+      - kafka
+
+  influxdb:
+    container_name: influxdb
+    image: influxdb:2.7
+    ports:
+      - "8086:8086"
+    volumes:
+      - influx_data:/var/lib/influxdb2
+
+  jobmanager:
+    build: ./meshtastic_kafka/jobs
+    container_name: jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: jobmanager
+
+  taskmanager:
+    build: ./meshtastic_kafka/jobs
+    container_name: taskmanager
+    command: taskmanager
+    depends_on:
+      - jobmanager
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: jobmanager
+
+  flink-job:
+    container_name: flink-job
+    env_file: ".env"
+    build: ./meshtastic_kafka/jobs
+    restart: unless-stopped
+    command: ["flink", "run", "-py", "flink_protobuf.py"]
+    # volumes:
+    #   - ./flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+    depends_on:
+      - kafka
+      - influxdb
+      - jobmanager
+
+volumes:
+  kafka_data:
+  influx_data:
