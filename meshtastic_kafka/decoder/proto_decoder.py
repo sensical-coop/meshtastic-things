@@ -6,7 +6,7 @@ import sys
 
 import structlog
 from dotenv import load_dotenv
-from proto_handler import ProtoHandler
+from decoder.proto_handler import ProtoHandler
 
 log = structlog.get_logger()
 
@@ -51,6 +51,5 @@ def main():
     except KeyboardInterrupt:
         log.info("Program interrupted by user")
         sys.exit(0)
-
 
 main()

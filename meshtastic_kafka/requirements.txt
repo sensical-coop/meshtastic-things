@@ -1,5 +1,7 @@
 kafka-python==2.2.15
+cryptography
 aiomqtt
+meshtastic
 structlog
 python-dotenv
 influxdb-client[async]==1.50.0

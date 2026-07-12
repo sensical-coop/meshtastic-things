@@ -25,6 +25,7 @@ class ProtoHandler(object):
     def __init__(self, kafka_bootstrap_server):
         self.kafka_bootstrap_server = kafka_bootstrap_server
         self.health_state = HealthState()
+
         # Consumer
         self.kafka_consumer = KafkaConsumer(
             bootstrap_servers=self.kafka_bootstrap_server,
@@ -40,11 +41,13 @@ class ProtoHandler(object):
         self.consumer_health = KafkaConsumerHealth(
             consumer=self.kafka_consumer,
             topic=os.environ['MQTT_BRIDGE__KAFKA_TOPIC'])
+
         # Producer
         self.kafka_producer = KafkaProducer(bootstrap_servers=self.kafka_bootstrap_server)
         self.consumer_health = KafkaConsumerHealth(
             consumer=self.kafka_consumer,
             topic=os.environ['MQTT_BRIDGE__KAFKA_TOPIC'])
+
         # TODO Health
         self.health_state = HealthState()
 
@@ -52,6 +55,7 @@ class ProtoHandler(object):
         se = mqtt_pb2.ServiceEnvelope()
         se.ParseFromString(msg)
         decoded_mp = se.packet
+
         # TODO Query DB and cache
         key = ""
 
@@ -147,6 +151,7 @@ class ProtoHandler(object):
                 for message in out_messages:
                     print (message)
                     self.kafka_producer.send(os.environ['PROTO_DECODE__KAFKA_TOPIC'], key=str(message["node_id"]).encode(), value=json.dumps(message).encode())
+
                 # TODO - Check why this sometimes fails
                 self.kafka_consumer.commit()
                 log.debug("Commit offset")

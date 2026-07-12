@@ -17,6 +17,16 @@ services:
       retries: 5
       start_period: 30s
 
+  proto_decoder:
+    container_name: proto-decoder
+    build: ./meshtastic_kafka
+    depends_on:
+      - kafka
+      - mqtt_kafka_bridge
+    env_file: ".env"
+    restart: unless-stopped
+    command: ["proto_decoder"]
+
   influxdb_writer:
     container_name: influxdb-writer
     build: ./meshtastic_kafka

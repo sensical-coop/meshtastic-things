@@ -3,6 +3,7 @@ import base64
 import structlog
 import argparse
 from dotenv import load_dotenv
+# TODO this currently doesn't work
 
 # from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 # from cryptography.hazmat.backends import default_backend
