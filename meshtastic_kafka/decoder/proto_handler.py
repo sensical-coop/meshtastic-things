@@ -1,6 +1,7 @@
 import json
 import os
 import asyncio
+import base64
 import sys
 from datetime import datetime
 
@@ -18,8 +19,9 @@ from tools.key import get_key
 log = structlog.get_logger()
 
 # TODO Move to DB
-KEY = "AQ=="
-KEY = "" if KEY == "AQ==" else KEY
+KEY = os.environ['MESH_CH0_ENCRYPTION_KEY']
+if KEY == "AQ==":
+    KEY = ""
 
 class ProtoHandler(object):
     def __init__(self, kafka_bootstrap_server):
@@ -55,13 +57,11 @@ class ProtoHandler(object):
         se = mqtt_pb2.ServiceEnvelope()
         se.ParseFromString(msg)
         decoded_mp = se.packet
-
-        # TODO Query DB and cache
-        key = ""
+        log.debug(f"Decoded packet: {decoded_mp}")
 
         # Try to decrypt the payload if it is encrypted
         if decoded_mp.HasField("encrypted") and not decoded_mp.HasField("decoded"):
-            decoded_data = self.decrypt_packet(decoded_mp, key)
+            decoded_data = self.decrypt_packet(decoded_mp, key=KEY)
             if decoded_data is None:
                 log.warn("Decryption failed; retaining original encrypted payload")
             else:
@@ -115,6 +115,7 @@ class ProtoHandler(object):
             return data
 
         except Exception as e:
+            print (e)
             return None
 
     async def proto_listener(self):
