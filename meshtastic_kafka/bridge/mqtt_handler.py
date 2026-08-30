@@ -1,5 +1,6 @@
 import asyncio
 import os
+import socket
 
 import aiomqtt
 from aiohttp import web
@@ -7,6 +8,7 @@ import structlog
 from kafka import KafkaProducer
 from tools.healthcheck import HealthState, KakfaProducerHealth, MQTTHealth
 from tools.key import get_key
+from tools.env import get_bool_env
 
 log = structlog.get_logger()
 
@@ -22,20 +24,36 @@ class MQTTHandler(object):
             timeout=int(os.environ['MQTT_BRIDGE__HEALTH__TIMEOUT'])
         )
         self.mqtt_health = MQTTHealth()
+        client_id_prefix = os.environ.get('MQTT_BRIDGE__CLIENT_ID_PREFIX', 'mesh-bridge')
+        self.client_id = f'{client_id_prefix}-{socket.gethostname()}'
 
     async def bridge_mqtt_kafka(self, topic, shared_sub=False):
 
         if shared_sub:
-            topic = f'$share/kafka-bridge/{topic}'
+            shared_group = os.environ.get('MQTT_BRIDGE__SHARED_GROUP', 'kafka-bridge')
+            topic = f'$share/{shared_group}/{topic}'
 
-        client = aiomqtt.Client(self.mqtt_broker, username=os.environ['MQTT_BRIDGE__USER'], password=os.environ['MQTT_BRIDGE__PASS'], clean_session=os.environ['MQTT_BRIDGE__CLEAN_SESSION'])
+        qos = int(os.environ.get('MQTT_BRIDGE__QOS', 1))
+        tls_params = None
+        if get_bool_env('MQTT_BRIDGE__SSL', default=True):
+            tls_params = aiomqtt.TLSParameters()
+
+        client = aiomqtt.Client(
+            self.mqtt_broker,
+            port=int(os.environ.get('MQTT_BRIDGE__PORT', 8883)),
+            username=os.environ['MQTT_BRIDGE__USER'],
+            password=os.environ['MQTT_BRIDGE__PASS'],
+            identifier=self.client_id,
+            clean_session=get_bool_env('MQTT_BRIDGE__CLEAN_SESSION', default=False),
+            tls_params=tls_params,
+        )
 
         while True:
             try:
                 async with client:
                     self.mqtt_health.mark_connected()
-                    log.info(f'Subscription: {self.mqtt_broker}, topic: {topic}')
-                    await client.subscribe(topic)
+                    log.info(f'Subscription: {self.mqtt_broker}, topic: {topic}, client_id: {self.client_id}, qos: {qos}')
+                    await client.subscribe(topic, qos=qos)
                     async for message in client.messages:
                         self.mqtt_health.mark_connected()
                         log.debug(f'Got message: {message.topic}: {message.payload}')
@@ -43,7 +61,7 @@ class MQTTHandler(object):
             except aiomqtt.MqttError:
                 self.mqtt_health.mark_disconnected()
                 log.info(f"Connection lost; Reconnecting in {int(os.environ['MQTT_BRIDGE__RECONNECT'])} seconds ...")
-                await asyncio.sleep(int(os.environ['MQTT_BRIGE__RECONNECT']))
+                await asyncio.sleep(int(os.environ['MQTT_BRIDGE__RECONNECT']))
             except Exception as e:
                 log.exception("An error occurred", exc_info=e)
 

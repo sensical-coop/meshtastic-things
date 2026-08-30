@@ -3,6 +3,7 @@ import os
 import sys
 import argparse
 from bridge.mqtt_handler import MQTTHandler
+from tools.env import get_bool_env
 from dotenv import load_dotenv
 
 import structlog
@@ -13,7 +14,7 @@ async def create_tasks(mqtt_handler):
     # queue = asyncio.Queue()
     log.info('Creating bridge tasks...')
     async with asyncio.TaskGroup() as tg:
-        tg.create_task(mqtt_handler.bridge_mqtt_kafka(topic=os.environ['MQTT_BRIDGE__TOPIC'], shared_sub=os.environ['MQTT_BRIDGE__SHARED_SUBS']))
+        tg.create_task(mqtt_handler.bridge_mqtt_kafka(topic=os.environ['MQTT_BRIDGE__TOPIC'], shared_sub=get_bool_env('MQTT_BRIDGE__SHARED_SUBS')))
         tg.create_task(mqtt_handler.monitor_publish())
         tg.create_task(mqtt_handler.start_health_server())
         tg.create_task(mqtt_handler.producer_health.monitor())
