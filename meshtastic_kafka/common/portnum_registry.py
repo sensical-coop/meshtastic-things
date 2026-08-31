@@ -10,10 +10,9 @@ _TELEMETRY_ONEOF = "variant"
 
 
 def classify(portnum: int, pb) -> str:
-    """Identify the semantic shape of a decoded payload for a portnum.
+    """Identify the shape of a decoded payload for a portnum.
 
-    Add a new portnum here and it gets a name everywhere else automatically:
-    decode dispatch and the downstream point-builders both key off this string.
+    Add a new portnum here to make it cascade everywhere else.
     """
     base = _NAMED_PORTNUMS.get(portnum)
     if base is None:

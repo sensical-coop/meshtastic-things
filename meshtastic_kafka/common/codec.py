@@ -19,10 +19,6 @@ def parse_envelope(raw: bytes) -> mqtt_pb2.ServiceEnvelope:
 def parse_service_envelope(raw: bytes) -> mesh_pb2.MeshPacket:
     return parse_envelope(raw).packet
 
-def packet_key(se: mqtt_pb2.ServiceEnvelope) -> str:
-    """Get broadcast lookup key for a packet's decryption key: channel + sender"""
-    return f"{se.channel_id}:{getattr(se.packet, 'from')}"
-
 def decrypt_packet(mp: mesh_pb2.MeshPacket, key_bytes: bytes | None) -> mesh_pb2.Data | None:
     """Decrypt a payload. Returns None if there is a failure"""
     if not key_bytes:
