@@ -1,17 +1,15 @@
 import json
 import os
 import asyncio
-from datetime import datetime
 
 from aiohttp import web
 import structlog
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
-from influxdb_client import Point, WriteOptions
+from influxdb_client import WriteOptions
 from influxdb_client.client.write_api import WriteType
 from kafka import KafkaConsumer
 from tools.healthcheck import HealthState, KafkaConsumerHealth
-
-MIN_FEASIBLE_TIME = 1577836800 # 01-01-2020 in epoch (s)
+from writer.point_builders import get_points
 
 log = structlog.get_logger()
 
@@ -26,64 +24,19 @@ class InfluxWriter(object):
 
         )
         self.influx_url = influx_url
-        log.debug(f"Subscribing to kafka topics {[os.environ['PROTO_DECODE__KAFKA_TOPIC']]}")
-        self.kafka_consumer.subscribe(
-            topics=[os.environ['PROTO_DECODE__KAFKA_TOPIC']]
-        )
+        topics = [os.environ['PROTO_DECODE__KAFKA_TOPIC']]
+        # Optional: also persist pattern-detection alarms into the same bucket,
+        # if that job is deployed
+        alarms_topic = os.environ.get('PATTERN_DETECTION__ALARMS_TOPIC')
+        if alarms_topic:
+            topics.append(alarms_topic)
+        log.debug(f"Subscribing to kafka topics {topics}")
+        self.kafka_consumer.subscribe(topics=topics)
         self.health_state = HealthState()
         self.consumer_health = KafkaConsumerHealth(
             consumer=self.kafka_consumer,
             topic=os.environ['PROTO_DECODE__KAFKA_TOPIC']
         )
-
-    def convert_date(self, time):
-        return datetime.utcfromtimestamp(time).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # TODO Make it variable size with message properties
-    def to_point(self, event: dict) -> Point:
-        print (event)
-
-        # TODO - Check if point is not already in cache
-        # TODO - Add other payload types (non-telemetry)
-
-        # Check if time comes from device or rx
-        timestamp = event['rx_time']
-        timestamp_quality = 'rx_time'
-        if 'payload' in event:
-            if 'time' in event['payload']:
-                if event['payload']['time'] > MIN_FEASIBLE_TIME:
-                    timestamp = event['payload']['time']
-                    timestamp_quality = 'payload'
-
-        point = {
-            "tags": {
-                "node_id": event["node_id"],
-            },
-            "fields": {},
-            "time": self.convert_date(timestamp),
-        }
-
-        try:
-            # TODO there must be a better way to do this based on protobuf info
-            # TODO make this error proof
-            for key in event['payload']:
-                if key == 'time': continue
-                if type(event['payload'][key]) == dict:
-                    telemetry_type = key
-                    for item in event['payload'][key]:
-                        point["fields"][item] = float(event['payload'][key][item])
-
-            point["measurement"] = telemetry_type
-            point["fields"]["packet_id"] = event["packet_id"]
-            point["fields"]["timestamp_quality"] = timestamp_quality
-
-        except Exception as e:
-            log.exception(f"Issue while parsing payload", exc_info=e)
-
-        else:
-            return Point.from_dict(point)
-
-        return None
 
     async def write_kafka_influx(self):
 
@@ -109,9 +62,7 @@ class InfluxWriter(object):
                             log.debug(f'{record.key} [{record.timestamp}]: {record.value}')
                             event = json.loads(record.value)
                             if event is not None:
-                                point = self.to_point(event)
-                                if point is not None:
-                                    points.append(self.to_point(event))
+                                points.extend(get_points(event))
                         except Exception as e:
                             log.exception(f"Bad message skipped", exc_info=e)
                 except Exception as e:
@@ -129,11 +80,14 @@ class InfluxWriter(object):
                     log.exception(f"Write failed, retrying next poll", exc_info=e)
 
     async def health_handler(self, request):
-        # TODO add influxdb healthcheck
         self.health_state.kafka_connected = self.consumer_health.is_healthy()
-        # self.health_state.influx_connected = self.influx_healt.is_healthy()
-        log.info(f'Health check. Kafka connected: {self.health_state.kafka_connected}')
-        # log.info(f'Health check. MQTT connected: {self.health_state.mqtt_connected}')
+        try:
+            async with InfluxDBClientAsync(url=self.influx_url, token=os.environ['INFLUX__TOKEN'], org=os.environ['INFLUX__ORG']) as influxdb_client:
+                self.health_state.influx_connected = await influxdb_client.ping()
+        except Exception as e:
+            log.warning("InfluxDB ping failed", error=str(e))
+            self.health_state.influx_connected = False
+        log.info(f'Health check. Kafka connected: {self.health_state.kafka_connected}, Influx connected: {self.health_state.influx_connected}')
 
         if self.health_state.is_healthy():
             return web.json_response({"status": "ok"})
