@@ -5,6 +5,8 @@ meshtastic
 structlog
 python-dotenv
 influxdb-client[async]==1.50.0
+boto3
+pyarrow
 protobuf>=4.21.12
 mypy~=1.10.0
 mypy-protobuf~=3.3.0
