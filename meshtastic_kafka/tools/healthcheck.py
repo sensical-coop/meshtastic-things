@@ -11,11 +11,12 @@ class HealthState:
         self.kafka_connected = False
         self.mqtt_connected = False
         self.influx_connected = False
+        self.s3_connected = False
 
     def is_healthy(self):
         return all([
             self.kafka_connected,
-            self.influx_connected or self.mqtt_connected
+            self.influx_connected or self.mqtt_connected or self.s3_connected
         ])
 
 class MQTTHealth:
