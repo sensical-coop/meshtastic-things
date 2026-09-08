@@ -204,7 +204,7 @@ cython_debug/
 #   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
 #   and can be added to the global gitignore or merged into this file. However, if you prefer,
 #   you could uncomment the following to ignore the entire vscode folder
-# .vscode/
+.vscode/
 
 # Ruff stuff:
 .ruff_cache/
@@ -219,3 +219,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Caddy admin UI basic-auth credentials. Password hashes (one file per user)
+# are created by scripts/caddy-admin-user.sh.
+caddy/credentials/*
+# Placeholder credentials (committed to avoid non-auth'd deployment to boot.)
+!caddy/credentials/00-locked.txt
+
+# Convention to avoid commiting local files
+*ignore.*
