@@ -33,6 +33,8 @@ RUN wget -P /opt/flink/lib/ https://repo.maven.apache.org/maven2/org/apache/kafk
 RUN mkdir -p /opt/flink/checkpoints /opt/flink/savepoints && chown -R flink:flink /opt/flink/checkpoints /opt/flink/savepoints
 
 WORKDIR /opt/flink/usrlib
-COPY flink/decode_job.py flink/calibration_job.py flink/pattern_detection_job.py .
+COPY flink/decode_job.py flink/calibration_job.py flink/pattern_detection_job.py flink/absence_detection_job.py .
+# Detached submission - see the script.
+COPY --chmod=0755 flink/submit-job.sh .
 
 USER flink

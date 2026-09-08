@@ -1,6 +1,5 @@
 import base64
 
-import structlog
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from google.protobuf.json_format import MessageToDict
@@ -9,7 +8,11 @@ from meshtastic.protobuf import mesh_pb2, mqtt_pb2
 
 from common import portnum_registry
 
-log = structlog.get_logger()
+# Channel.psk default AQ==
+_DEFAULT_CHANNEL_KEY = bytes(
+    [0xD4, 0xF1, 0xBB, 0x3A, 0x20, 0x29, 0x07, 0x59, 0xF0, 0xBC, 0xFF, 0xAB, 0xCF, 0x4E, 0x69, 0x01]
+)
+
 
 def parse_envelope(raw: bytes) -> mqtt_pb2.ServiceEnvelope:
     se = mqtt_pb2.ServiceEnvelope()
@@ -32,8 +35,8 @@ def decrypt_packet(mp: mesh_pb2.MeshPacket, key_bytes: bytes | None) -> mesh_pb2
         data = mesh_pb2.Data()
         data.ParseFromString(decrypted_bytes)
         return data
-    except Exception as e:
-        log.warning("Decryption failed", error=str(e))
+    except Exception:
+        # Do not log anything here
         return None
 
 def decode_payload(mp: mesh_pb2.MeshPacket):
@@ -79,7 +82,6 @@ def decode_message(raw: bytes, key_bytes: bytes | None) -> dict | None:
     if mp.HasField("encrypted") and not mp.HasField("decoded"):
         decrypted = decrypt_packet(mp, key_bytes)
         if decrypted is None:
-            log.warning("Decryption failed; dropping message")
             return None
         mp.decoded.CopyFrom(decrypted)
 
@@ -94,9 +96,13 @@ def decode_message(raw: bytes, key_bytes: bytes | None) -> dict | None:
 def decode_psk(key_b64: str) -> bytes | None:
     """Base64-decode a channel PSK read from the key store.
 
-    Meshtastic uses "AQ==" to "use the default channel PSK". We treat
-    that as "no key", since we don't expand the real default PSK yet.
     """
-    if not key_b64 or key_b64 == "AQ==":
+    if not key_b64:
         return None
-    return base64.b64decode(key_b64.encode("ascii"))
+    raw = base64.b64decode(key_b64.encode("ascii"))
+    if len(raw) == 1:
+        index = raw[0]
+        if index == 0:
+            return None
+        return _DEFAULT_CHANNEL_KEY[:-1] + bytes([(_DEFAULT_CHANNEL_KEY[-1] + index - 1) & 0xFF])
+    return raw

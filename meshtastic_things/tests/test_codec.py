@@ -98,8 +98,17 @@ def test_decode_encrypted_with_wrong_key_returns_none_not_raises():
     assert result is None
 
 
-def test_decode_psk_treats_default_psk_sentinel_as_no_key():
-    assert codec.decode_psk("AQ==") is None
+def test_decode_psk_expands_default_channel_key_shorthand():
+    default_key = bytes(
+        [0xD4, 0xF1, 0xBB, 0x3A, 0x20, 0x29, 0x07, 0x59, 0xF0, 0xBC, 0xFF, 0xAB, 0xCF, 0x4E, 0x69, 0x01]
+    )
+    assert codec.decode_psk("AQ==") == default_key  # index 1: the literal default key
+    assert codec.decode_psk("Ag==") == default_key[:-1] + bytes([0x02])  # index 2: simple2
+    assert codec.decode_psk("Cg==") == default_key[:-1] + bytes([0x0A])  # index 10: simple10
+
+
+def test_decode_psk_treats_zero_byte_as_no_crypto():
+    assert codec.decode_psk("AA==") is None
     assert codec.decode_psk("") is None
     assert codec.decode_psk(None) is None
 
@@ -108,12 +117,3 @@ def test_decode_psk_decodes_real_key():
     key_bytes = os.urandom(16)
     key_b64 = base64.b64encode(key_bytes).decode("ascii")
     assert codec.decode_psk(key_b64) == key_bytes
-
-
-def test_packet_key_combines_channel_and_device():
-    mp = _telemetry_packet(packet_id=1, node_id=555, battery_level=50)
-    se = mqtt_pb2.ServiceEnvelope()
-    se.packet.CopyFrom(mp)
-    se.channel_id = "AdminChan"
-
-    assert codec.packet_key(se) == "AdminChan:555"

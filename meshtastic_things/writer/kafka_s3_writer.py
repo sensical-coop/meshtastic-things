@@ -43,6 +43,7 @@ def main():
         endpoint_url=os.environ.get('S3_WRITER__ENDPOINT_URL'),
         access_key=os.environ.get('S3_WRITER__ACCESS_KEY'),
         secret_key=os.environ.get('S3_WRITER__SECRET_KEY'),
+        region_name=os.environ.get('S3_WRITER__REGION'),
     )
 
     log.info("Starting S3 writer...")

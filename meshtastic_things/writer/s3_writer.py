@@ -30,13 +30,23 @@ def _flatten(event: dict) -> dict:
         "hop_start": event.get("hop_start"),
         "channel_id": event.get("channel_id"),
         "gateway_id": event.get("gateway_id"),
+        "mesh_id": event.get("mesh_id"),
         "payload_kind": event.get("payload_kind"),
         "payload_json": json.dumps(event.get("payload")),
     }
 
 
 class S3Writer(object):
-    def __init__(self, kafka_bootstrap_server, s3_bucket, s3_prefix, endpoint_url=None, access_key=None, secret_key=None):
+    def __init__(
+        self,
+        kafka_bootstrap_server,
+        s3_bucket,
+        s3_prefix,
+        endpoint_url=None,
+        access_key=None,
+        secret_key=None,
+        region_name=None,
+    ):
         self.kafka_bootstrap_server = kafka_bootstrap_server
         self.kafka_consumer = KafkaConsumer(
             bootstrap_servers=self.kafka_bootstrap_server,
@@ -57,6 +67,8 @@ class S3Writer(object):
             endpoint_url=endpoint_url or None,
             aws_access_key_id=access_key or None,
             aws_secret_access_key=secret_key or None,
+            # Not needed for MinIO
+            region_name=region_name or None,
         )
         self._ensure_bucket()
 
@@ -71,15 +83,28 @@ class S3Writer(object):
                 log.warning(f"Could not create/verify bucket {self.s3_bucket}, will retry on write", error=str(e))
 
     def flush(self, records: list[dict]) -> None:
+        """Grouped by (mesh_id, node_id) and writes one file per group per "flush"
+        """
         if not records:
             return
-        table = pa.Table.from_pylist([_flatten(r) for r in records])
         now = datetime.now(timezone.utc)
-        key = f"{self.s3_prefix}/dt={now:%Y-%m-%d}/hour={now:%H}/part-{uuid.uuid4()}.parquet"
-        buf = pa.BufferOutputStream()
-        pq.write_table(table, buf)
-        self.s3_client.put_object(Bucket=self.s3_bucket, Key=key, Body=buf.getvalue().to_pybytes())
-        log.info(f"Flushed {len(records)} records to s3://{self.s3_bucket}/{key}")
+        groups: dict[tuple, list[dict]] = {}
+        for r in records:
+            groups.setdefault((r.get("mesh_id"), r.get("node_id")), []).append(r)
+
+        for (mesh_id, node_id), group_records in groups.items():
+            table = pa.Table.from_pylist([_flatten(r) for r in group_records])
+            parts = [self.s3_prefix]
+            if mesh_id:
+                parts.append(f"mesh_id={mesh_id}")
+            if node_id is not None:
+                parts.append(f"node_id={node_id}")
+            parts += [f"dt={now:%Y-%m-%d}", f"hour={now:%H}"]
+            key = "/".join(parts) + f"/part-{uuid.uuid4()}.parquet"
+            buf = pa.BufferOutputStream()
+            pq.write_table(table, buf)
+            self.s3_client.put_object(Bucket=self.s3_bucket, Key=key, Body=buf.getvalue().to_pybytes())
+            log.info(f"Flushed {len(group_records)} records to s3://{self.s3_bucket}/{key}")
 
     async def write_kafka_s3(self):
         batch_size = int(os.environ.get("S3_WRITER__BATCH_SIZE", 1000))

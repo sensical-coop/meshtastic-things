@@ -31,6 +31,9 @@ def _resolve_timestamp(event: dict) -> tuple[int, str]:
 def _base_point_dict(event: dict, measurement: str) -> dict:
     timestamp, quality = _resolve_timestamp(event)
     tags = {"node_id": event["node_id"]}
+    if event.get("mesh_id"):
+        # node_id alone is not unique
+        tags["mesh_id"] = event["mesh_id"]
     if event.get("channel_id"):
         tags["channel_id"] = event["channel_id"]
     if event.get("gateway_id"):
@@ -108,20 +111,39 @@ def build_generic_points(event: dict) -> list[Point]:
 
 
 def build_alarm_points(event: dict) -> list[Point]:
-    """Pattern-detection job alarm events (see flink/pattern_detection_job.py) have a
-    different shape from decoded messages - no packet_id/rx_time/payload_kind - so they
-    don't go through _base_point_dict like the builders above."""
+    """Quality alarm events have a different shape from decoded messages - no
+    packet_id/rx_time/payload_kind - so they don't go through _base_point_dict
+    like the builders above. Example:
+
+        {mesh_id, device_id, channel, detector, source, value, message, triggered_at}
+
+    """
+    device_id = event.get("device_id", event.get("node_id"))
+    channel = event.get("channel", event.get("field"))
+
+    tags = {"detector": event["detector"]}
+
+    if device_id is not None:
+        tags["node_id"] = str(device_id)
+    if event.get("mesh_id"):
+        # node_id alone is not unique
+        tags["mesh_id"] = event["mesh_id"]
+    if channel:
+        # Absent for device alarms.
+        tags["channel"] = channel
+    if event.get("source"):
+        # "stream" or "batch" detection.
+        tags["source"] = event["source"]
+
+    fields = {"message": str(event.get("message", ""))}
+    value = event.get("value")
+    if value is not None:
+        fields["value"] = float(value)
+
     point_dict = {
         "measurement": "alarms",
-        "tags": {
-            "node_id": event["node_id"],
-            "field": event["field"],
-            "detector": event["detector"],
-        },
-        "fields": {
-            "value": float(event["value"]),
-            "message": str(event.get("message", "")),
-        },
+        "tags": tags,
+        "fields": fields,
         "time": event["triggered_at"],
     }
     return [Point.from_dict(point_dict)]

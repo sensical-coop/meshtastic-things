@@ -43,8 +43,8 @@ class InfluxWriter(object):
         while True:
             # log.debug("Getting points")
             messages = self.kafka_consumer.poll(
-                max_records=int(os.environ['INFLUX__CONSUMER__N_MSGS']),
-                timeout_ms=int(os.environ['INFLUX__CONSUMER__TIMEOUT_MS']))
+                max_records=int(os.environ['INFLUXDB_WRITER__CONSUMER__N_MSGS']),
+                timeout_ms=int(os.environ['INFLUXDB_WRITER__CONSUMER__TIMEOUT_MS']))
 
             # TODO We need to leave some time for other health checks
             # And to avoid CPU to go awol
@@ -95,13 +95,13 @@ class InfluxWriter(object):
 
     async def start_health_server(self):
         try:
-            log.info(f"Starting health server on 0.0.0.0:{int(os.environ['INFLUX__HEALTHCHECK_PORT'])}")
+            log.info(f"Starting health server on 0.0.0.0:{int(os.environ['INFLUXDB_WRITER__HEALTHCHECK_PORT'])}")
             app = web.Application()
             app.router.add_get("/health", self.health_handler)
 
             runner = web.AppRunner(app)
             await runner.setup()
-            site = web.TCPSite(runner, "0.0.0.0", int(os.environ['INFLUX__HEALTHCHECK_PORT']))
+            site = web.TCPSite(runner, "0.0.0.0", int(os.environ['INFLUXDB_WRITER__HEALTHCHECK_PORT']))
             await site.start()
         except Exception as e:
             log.exception('Problem with web server', exc_info=e)
