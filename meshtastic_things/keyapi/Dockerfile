@@ -13,7 +13,6 @@ COPY keyapi/ ./
 # function_name/inputs/params
 COPY common/ ./common/
 
-# collectstatic just needs settings.py to import, not a real secret -
 # KEYAPI__SECRET_KEY has no runtime fallback
 RUN KEYAPI__SECRET_KEY=build-time-only-unused python manage.py collectstatic --noinput
 
