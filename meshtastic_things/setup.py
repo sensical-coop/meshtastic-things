@@ -13,7 +13,7 @@ if sys.version_info < (3,9):
 REQUIREMENTS = [i.strip() for i in open("requirements.txt").readlines()]
 
 setup(
-    name='meshtastic-kafka',
+    name='meshtastic-things',
     version='0.1.0',
     description='Ingest meshtastic data into kafka queues and influxDB',
     author='oscgonfer',
