@@ -1,0 +1,84 @@
+# The /management and /data prefixes must match common/gateway.py
+{$CADDY_SITE_ADDRESS::80} {
+	handle / {
+		header Content-Type application/json
+		respond `{
+  "name": "Meshtastic Things gateway",
+  "schema": "/schema",
+  "docs": "/docs",
+  "services": [
+    {
+      "name": "management",
+      "description": "Owners, meshes, devices, measurements, postprocessing blueprints",
+      "base": "/management",
+      "schema": "/management/schema",
+      "docs": "/management/docs",
+      "health": "/management/health"
+    },
+    {
+      "name": "data",
+      "description": "Timeseries and readings",
+      "base": "/data",
+      "schema": "/data/schema",
+      "docs": "/data/docs",
+      "health": "/data/health"
+    }
+  ]
+}` 200
+	}
+
+	handle /schema {
+		rewrite * /gateway-schema
+		reverse_proxy key-management-api:8090
+	}
+
+	# One Swagger UI
+	handle /docs {
+		rewrite * /gateway-docs
+		reverse_proxy key-management-api:8090
+	}
+
+	handle_path /management/* {
+		reverse_proxy key-management-api:8090
+	}
+
+	handle_path /data/* {
+		reverse_proxy query-api:8091
+	}
+
+	handle {
+		header Content-Type application/json
+		respond `{"detail": "Not found. See / for the service index."}` 404
+	}
+}
+
+# Admin UIs
+# Kafka UI, the Flink dashboard, InfluxDB and the MinIO console with their own addresses
+# because they can't be proxied
+(admin_ui) {
+	basic_auth bcrypt {
+		# Credentials come from files in ./caddy/credentials/
+		# Add a user:  ./scripts/caddy-admin-user.sh <name>
+		import /etc/caddy/credentials/*.txt
+	}
+}
+
+{$CADDY_FLINK_ADDRESS::8181} {
+	import admin_ui
+	reverse_proxy jobmanager:8081
+}
+
+{$CADDY_KAFKAUI_ADDRESS::8182} {
+	import admin_ui
+	reverse_proxy kafbat-ui:8080
+}
+
+{$CADDY_INFLUX_ADDRESS::8183} {
+	import admin_ui
+	reverse_proxy influxdb:8086
+}
+
+{$CADDY_MINIO_ADDRESS::8184} {
+	import admin_ui
+	reverse_proxy minio:9001
+}
