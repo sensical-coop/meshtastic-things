@@ -2,17 +2,22 @@ from datetime import timedelta
 
 import structlog
 from django.conf import settings
+from django.contrib.auth import login as auth_login, logout as auth_logout
+from django.contrib.auth.password_validation import validate_password
+from django.core.cache import cache
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
 from django.db.models import Q
+from django.middleware.csrf import get_token as get_csrf_token
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.exceptions import NotFound, ParseError, PermissionDenied
+from rest_framework.exceptions import AuthenticationFailed, NotFound, ParseError, PermissionDenied, Throttled, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .auth import generate_api_key, hash_api_key
-from .emailing import send_verification_email
+from .emailing import send_password_reset_email, send_verification_email
 from .exceptions import BadGateway, Conflict
 from .kafka_publisher import get_publisher
 from common.algorithms import REGISTRY, discover
@@ -37,9 +42,13 @@ from .serializers import (
     MeasurementTypeUpdateSerializer,
     MeshSerializer,
     MeshUpdateSerializer,
+    OwnerChangePasswordSerializer,
     OwnerCreateSerializer,
+    OwnerLoginSerializer,
     OwnerPublicSerializer,
     OwnerReadSerializer,
+    OwnerRequestPasswordResetSerializer,
+    OwnerResetPasswordSerializer,
     OwnerUpdateSerializer,
     OwnerWithApiKeySerializer,
     PostprocessingBlueprintSerializer,
@@ -87,6 +96,7 @@ class OwnerListCreateView(APIView):
             owner = Owner.objects.create_user(
                 email=serializer.validated_data["email"],
                 name=serializer.validated_data["name"],
+                password=serializer.validated_data["password"],
                 api_key_hash=hash_api_key(api_key),
                 is_active=False,
                 email_verification_token_hash=hash_api_key(verification_token),
@@ -105,8 +115,7 @@ class OwnerListCreateView(APIView):
 
 
 class OwnerVerifyEmailView(APIView):
-    """GET /owners/verify-email?token=<token> - the emailed link, idempotent once
-    verified"""
+    """GET /owners/verify-email?token=<token>"""
 
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -153,6 +162,116 @@ class OwnerResendVerificationView(APIView):
             log.warning("verification_email_send_failed", owner_id=str(owner.id), error=str(e))
             raise BadGateway("Failed to send verification email, try again shortly")
         return Response({"detail": "Verification email sent"})
+
+
+class CsrfCookieView(APIView):
+    """GET /owners/csrf-cookie"""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    def get(self, request):
+        get_csrf_token(request)
+        return Response({"detail": "CSRF cookie set"})
+
+
+LOGIN_FAILED_RATE_LIMIT = 10
+LOGIN_FAILED_RATE_WINDOW_SECONDS = 300
+
+
+class OwnerLoginView(APIView):
+    """POST /owners/login. Sets a session cookie"""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = OwnerLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        cache_key = f"keyapi:failed-login:{request.META.get('REMOTE_ADDR', 'unknown')}"
+        if (cache.get(cache_key) or 0) >= LOGIN_FAILED_RATE_LIMIT:
+            raise Throttled(detail="Too many failed login attempts, slow down")
+
+        owner = Owner.objects.filter(email=serializer.validated_data["email"]).first()
+        if owner is None or not owner.check_password(serializer.validated_data["password"]):
+            try:
+                cache.incr(cache_key)
+            except ValueError:
+                cache.set(cache_key, 1, LOGIN_FAILED_RATE_WINDOW_SECONDS)
+            raise AuthenticationFailed("Invalid email or password")
+        if not owner.is_active:
+            raise PermissionDenied("Email not verified - see POST /owners/me/resend-verification")
+
+        auth_login(request, owner, backend="django.contrib.auth.backends.ModelBackend")
+        data = OwnerReadSerializer(owner).data
+        data["devices"] = _devices_for_owner(owner)
+        return Response(data)
+
+
+class OwnerLogoutView(APIView):
+    """POST /owners/logout - clears the session."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        auth_logout(request)
+        return Response({"detail": "Logged out"})
+
+
+class OwnerRequestPasswordResetView(APIView):
+    """POST /owners/request-password-reset"""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = OwnerRequestPasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        owner = Owner.objects.filter(email=serializer.validated_data["email"]).first()
+        if owner is not None:
+            reset_token = generate_api_key()
+            owner.password_reset_token_hash = hash_api_key(reset_token)
+            owner.password_reset_sent_at = timezone.now()
+            owner.save(update_fields=["password_reset_token_hash", "password_reset_sent_at"])
+            try:
+                send_password_reset_email(owner, reset_token)
+            except Exception as e:
+                log.warning("password_reset_email_send_failed", owner_id=str(owner.id), error=str(e))
+        return Response({"detail": "If that email is registered, a reset link has been sent"})
+
+
+class OwnerResetPasswordView(APIView):
+    """POST /owners/reset-password"""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = OwnerResetPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        owner = Owner.objects.filter(
+            password_reset_token_hash=hash_api_key(serializer.validated_data["token"])
+        ).first()
+        ttl = timedelta(hours=settings.PASSWORD_RESET_TTL_HOURS)
+        expired = owner is None or owner.password_reset_sent_at is None or (
+            timezone.now() > owner.password_reset_sent_at + ttl
+        )
+        if expired:
+            raise ParseError(
+                "Invalid or expired reset link - request a new one via "
+                "POST /owners/request-password-reset"
+            )
+        try:
+            validate_password(serializer.validated_data["new_password"], user=owner)
+        except DjangoValidationError as e:
+            raise ValidationError({"new_password": list(e.messages)})
+        owner.set_password(serializer.validated_data["new_password"])
+        owner.password_reset_token_hash = None
+        owner.password_reset_sent_at = None
+        owner.save(update_fields=["password", "password_reset_token_hash", "password_reset_sent_at"])
+        return Response({"detail": "Password reset"})
 
 
 class OwnerDetailView(APIView):
@@ -205,7 +324,7 @@ class OwnerMeView(APIView):
             try:
                 send_verification_email(owner, verification_token)
             except Exception as e:
-                # TODO Fix - Send failure is logged only
+                # TODO - Evaluate if there is a place where failures can be visibly to user (for instance, a task manager UI)
                 log.warning("verification_email_send_failed", owner_id=str(owner.id), error=str(e))
         return Response(OwnerReadSerializer(owner).data)
 
@@ -254,6 +373,26 @@ class OwnerRotateKeyView(APIView):
             except Exception as e:
                 log.warning("owner_auth_revocation_publish_failed", owner_id=str(request.user.id), error=str(e))
         return Response(OwnerWithApiKeySerializer(request.user).data)
+
+
+class OwnerChangePasswordView(APIView):
+    """POST /owners/me/change-password"""
+
+    permission_classes = [IsVerifiedOwner]
+
+    def post(self, request):
+        serializer = OwnerChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        owner = request.user
+        if not owner.check_password(serializer.validated_data["current_password"]):
+            raise ValidationError({"current_password": ["Incorrect password"]})
+        try:
+            validate_password(serializer.validated_data["new_password"], user=owner)
+        except DjangoValidationError as e:
+            raise ValidationError({"new_password": list(e.messages)})
+        owner.set_password(serializer.validated_data["new_password"])
+        owner.save(update_fields=["password"])
+        return Response({"detail": "Password changed"})
 
 
 def _devices_for_owner(owner: Owner) -> list[dict]:

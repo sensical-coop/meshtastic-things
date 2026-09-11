@@ -44,3 +44,14 @@ class ResendVerificationThrottle(SimpleRateThrottle):
         if not (request.user and getattr(request.user, "is_authenticated", False)):
             return None
         return self.cache_format % {"scope": self.scope, "ident": request.user.id}
+
+
+class RequestPasswordResetThrottle(SimpleRateThrottle):
+    """POST /owners/request-password-reset"""
+
+    scope = "request-password-reset"
+
+    def get_cache_key(self, request, view):
+        if request.method != "POST" or request.path != "/owners/request-password-reset":
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}

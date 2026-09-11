@@ -77,7 +77,10 @@ CACHES = {
 }
 
 AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
 LANGUAGE_CODE = "en-us"
@@ -95,7 +98,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 APPEND_SLASH = False
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": ["registry.authentication.OwnerBearerAuthentication"],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "registry.authentication.OwnerBearerAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
     "DEFAULT_PERMISSION_CLASSES": ["registry.permissions.IsVerifiedOwner"],
     "UNAUTHENTICATED_USER": "django.contrib.auth.models.AnonymousUser",
     "DEFAULT_THROTTLE_CLASSES": [
@@ -103,12 +109,14 @@ REST_FRAMEWORK = {
         "registry.throttling.AnonReadThrottle",
         "registry.throttling.SignupThrottle",
         "registry.throttling.ResendVerificationThrottle",
+        "registry.throttling.RequestPasswordResetThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
         "owner": "120/min",
         "anon": "60/min",
         "owner-signup": "5/hour",
         "resend-verification": "3/hour",
+        "request-password-reset": "5/hour",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
@@ -130,6 +138,8 @@ CORS_ALLOWED_ORIGINS = env_list("KEYAPI__CORS_ORIGINS")
 if CORS_ALLOWED_ORIGINS:
     INSTALLED_APPS.insert(0, "corsheaders")
     MIDDLEWARE.insert(0, "corsheaders.middleware.CorsMiddleware")
+    CORS_ALLOW_CREDENTIALS = True
+    CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
 
 LOGGING = {
     "version": 1,

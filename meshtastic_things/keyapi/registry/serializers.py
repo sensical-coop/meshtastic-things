@@ -1,3 +1,5 @@
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from common.algorithms import validate_step
@@ -37,10 +39,18 @@ class OwnerReadSerializer(serializers.ModelSerializer):
 
 class OwnerCreateSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(validators=[])
+    password = serializers.CharField(write_only=True)
 
     class Meta:
         model = Owner
-        fields = ["name", "email"]
+        fields = ["name", "email", "password"]
+
+    def validate(self, attrs):
+        try:
+            validate_password(attrs["password"], user=Owner(email=attrs.get("email"), name=attrs.get("name")))
+        except DjangoValidationError as e:
+            raise serializers.ValidationError({"password": list(e.messages)})
+        return attrs
 
 
 class OwnerUpdateSerializer(serializers.ModelSerializer):
@@ -59,6 +69,33 @@ class OwnerWithApiKeySerializer(OwnerReadSerializer):
 
     class Meta(OwnerReadSerializer.Meta):
         fields = OwnerReadSerializer.Meta.fields + ["api_key"]
+
+
+class OwnerLoginSerializer(serializers.Serializer):
+    """POST /owners/login input"""
+
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+
+
+class OwnerRequestPasswordResetSerializer(serializers.Serializer):
+    """POST /owners/request-password-reset input"""
+
+    email = serializers.EmailField()
+
+
+class OwnerResetPasswordSerializer(serializers.Serializer):
+    """POST /owners/reset-password input"""
+
+    token = serializers.CharField()
+    new_password = serializers.CharField(write_only=True)
+
+
+class OwnerChangePasswordSerializer(serializers.Serializer):
+    """POST /owners/me/change-password input"""
+
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
 
 
 _PSK_HELP = "Base64-encoded channel PSK"

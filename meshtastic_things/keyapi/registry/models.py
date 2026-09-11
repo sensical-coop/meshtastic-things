@@ -40,6 +40,8 @@ class Owner(AbstractBaseUser, PermissionsMixin):
     email_verified_at = models.DateTimeField(null=True, blank=True)
     email_verification_token_hash = models.CharField(max_length=64, unique=True, db_index=True, null=True, blank=True)
     email_verification_sent_at = models.DateTimeField(null=True, blank=True)
+    password_reset_token_hash = models.CharField(max_length=64, unique=True, db_index=True, null=True, blank=True)
+    password_reset_sent_at = models.DateTimeField(null=True, blank=True)
 
     objects = OwnerManager()
 
