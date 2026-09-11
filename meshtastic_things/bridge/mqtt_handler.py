@@ -7,8 +7,15 @@ from aiohttp import web
 import structlog
 from kafka import KafkaProducer
 from tools.healthcheck import HealthState, KakfaProducerHealth, MQTTHealth
-from tools.key import get_key
 from tools.env import get_bool_env
+
+
+def _partition_key(topic):
+    # The last topic segment is the relaying gateway's node id (e.g.
+    # msh/.../2/e/LongFast/!aabbccdd) for the encrypted feed this bridge
+    # subscribes to - matches ServiceEnvelope.gateway_id, which is what
+    # decode_job.py's broadcast-state lookup keys off of.
+    return topic.value.split('/')[-1].encode()
 
 log = structlog.get_logger()
 
@@ -57,7 +64,7 @@ class MQTTHandler(object):
                     async for message in client.messages:
                         self.mqtt_health.mark_connected()
                         log.debug(f'Got message: {message.topic}: {message.payload}')
-                        self.kafka_producer.send(os.environ['MQTT_BRIDGE__KAFKA_TOPIC'], key=get_key(message.topic, message.payload), value=message.payload)
+                        self.kafka_producer.send(os.environ['MQTT_BRIDGE__KAFKA_TOPIC'], key=_partition_key(message.topic), value=message.payload)
             except aiomqtt.MqttError:
                 self.mqtt_health.mark_disconnected()
                 log.info(f"Connection lost; Reconnecting in {int(os.environ['MQTT_BRIDGE__RECONNECT'])} seconds ...")
