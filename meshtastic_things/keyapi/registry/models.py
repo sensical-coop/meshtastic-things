@@ -228,27 +228,30 @@ class TelemetryVariantMeasurement(models.Model):
         ]
 
 
-class Sensor(models.Model):
-    # TODO Fix
+class DeviceTelemetryVariant(models.Model):
+    """
+    Auto-created.
+    Read via GET /devices/{id}/telemetry-variants.
+    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="sensors")
-    telemetry_variant = models.ForeignKey(TelemetryVariant, on_delete=models.CASCADE, related_name="sensors")
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="telemetry_variants")
+    telemetry_variant = models.ForeignKey(TelemetryVariant, on_delete=models.CASCADE, related_name="device_links")
     first_seen = models.DateTimeField(auto_now_add=True)
     last_seen = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        db_table = "sensors"
+        db_table = "device_telemetry_variants"
         constraints = [
-            models.UniqueConstraint(fields=["device", "telemetry_variant"], name="uq_sensor_device_telemetry_variant")
+            models.UniqueConstraint(fields=["device", "telemetry_variant"], name="uq_device_telemetry_variant")
         ]
 
 
 class Measurement(models.Model):
-    """One measurement channel a Sensor produces"""
+    """One measurement channel a DeviceTelemetryVariant produces"""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    sensor = models.ForeignKey(Sensor, on_delete=models.CASCADE, related_name="measurements")
+    device_telemetry_variant = models.ForeignKey(DeviceTelemetryVariant, on_delete=models.CASCADE, related_name="measurements")
     measurement_type = models.ForeignKey(MeasurementType, on_delete=models.CASCADE, related_name="measurements")
     first_seen = models.DateTimeField(auto_now_add=True)
     last_seen = models.DateTimeField(null=True, blank=True)
@@ -256,5 +259,8 @@ class Measurement(models.Model):
     class Meta:
         db_table = "measurements"
         constraints = [
-            models.UniqueConstraint(fields=["sensor", "measurement_type"], name="uq_measurement_sensor_type")
+            models.UniqueConstraint(
+                fields=["device_telemetry_variant", "measurement_type"],
+                name="uq_measurement_device_telemetry_variant_type",
+            )
         ]

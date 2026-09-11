@@ -7,13 +7,13 @@ from common.channels import channel_name, origin_of
 
 from .models import (
     Device,
+    DeviceTelemetryVariant,
     Measurement,
     MeasurementType,
     Mesh,
     Owner,
     PostprocessingBlueprint,
     PostprocessingStep,
-    Sensor,
     TelemetryVariant,
     TelemetryVariantMeasurement,
 )
@@ -358,7 +358,7 @@ class DeviceTelemetryVariantSerializer(serializers.ModelSerializer):
     telemetry_variant = TelemetryVariantReadSerializer(read_only=True)
 
     class Meta:
-        model = Sensor
+        model = DeviceTelemetryVariant
         fields = ["id", "telemetry_variant", "first_seen", "last_seen"]
         read_only_fields = fields
 
@@ -370,7 +370,7 @@ class DeviceMeasurementSerializer(serializers.ModelSerializer):
     payload_kind = serializers.CharField(source="measurement_type.payload_kind", read_only=True)
     channel = serializers.SerializerMethodField()
     origin = serializers.SerializerMethodField()
-    telemetry_variant_id = serializers.UUIDField(source="sensor.telemetry_variant_id", read_only=True)
+    telemetry_variant_id = serializers.UUIDField(source="device_telemetry_variant.telemetry_variant_id", read_only=True)
 
     class Meta:
         model = Measurement

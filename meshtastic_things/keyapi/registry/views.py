@@ -677,8 +677,8 @@ class DeviceTelemetryVariantsView(APIView):
     def get(self, request, id):
         device = _get_device_or_404(id)
         _require_mesh_ownership(device.mesh, request.user)
-        sensors = device.sensors.select_related("telemetry_variant")
-        return Response(DeviceTelemetryVariantSerializer(sensors, many=True).data)
+        variants = device.telemetry_variants.select_related("telemetry_variant")
+        return Response(DeviceTelemetryVariantSerializer(variants, many=True).data)
 
 
 class DeviceMeasurementsView(APIView):
@@ -691,8 +691,8 @@ class DeviceMeasurementsView(APIView):
         device = _get_device_or_404(id)
         _require_mesh_ownership(device.mesh, request.user)
         measurements = (
-            Measurement.objects.filter(sensor__device=device)
-            .select_related("measurement_type", "sensor")
+            Measurement.objects.filter(device_telemetry_variant__device=device)
+            .select_related("measurement_type", "device_telemetry_variant")
             .order_by("measurement_type__payload_kind", "measurement_type__field_name")
         )
         return Response(DeviceMeasurementSerializer(measurements, many=True).data)

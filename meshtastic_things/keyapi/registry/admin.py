@@ -3,13 +3,13 @@ from django.contrib.auth.admin import UserAdmin
 
 from .models import (
     Device,
+    DeviceTelemetryVariant,
     Measurement,
     MeasurementType,
     Mesh,
     Owner,
     PostprocessingBlueprint,
     PostprocessingStep,
-    Sensor,
     TelemetryVariant,
 )
 
@@ -92,9 +92,8 @@ class TelemetryVariantAdmin(admin.ModelAdmin):
     search_fields = ("payload_kind", "name", "model")
 
 
-@admin.register(Sensor)
-class SensorAdmin(admin.ModelAdmin):
-    # TODO - Needs fixing.
+@admin.register(DeviceTelemetryVariant)
+class DeviceTelemetryVariantAdmin(admin.ModelAdmin):
     list_display = ("device", "telemetry_variant", "first_seen", "last_seen")
     readonly_fields = ("id", "device", "telemetry_variant", "first_seen", "last_seen")
     search_fields = ("device__device_id",)
@@ -105,9 +104,9 @@ class SensorAdmin(admin.ModelAdmin):
 
 @admin.register(Measurement)
 class MeasurementAdmin(admin.ModelAdmin):
-    list_display = ("sensor", "measurement_type", "first_seen", "last_seen")
-    readonly_fields = ("id", "sensor", "measurement_type", "first_seen", "last_seen")
-    search_fields = ("sensor__device__device_id", "measurement_type__field_name")
+    list_display = ("device_telemetry_variant", "measurement_type", "first_seen", "last_seen")
+    readonly_fields = ("id", "device_telemetry_variant", "measurement_type", "first_seen", "last_seen")
+    search_fields = ("device_telemetry_variant__device__device_id", "measurement_type__field_name")
 
     def has_add_permission(self, request):
         return False

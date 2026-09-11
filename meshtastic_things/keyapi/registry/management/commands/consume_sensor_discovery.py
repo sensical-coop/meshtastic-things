@@ -1,5 +1,5 @@
-"""Background worker: upserts TelemetryVariant/Sensor/MeasurementType/Measurement
-rows per mesh.sensor_discovery.v1 event
+"""Background worker: upserts TelemetryVariant/DeviceTelemetryVariant/
+MeasurementType/Measurement rows per mesh.sensor_discovery.v1 event
 
   python manage.py consume_sensor_discovery
 """
@@ -13,13 +13,13 @@ from kafka import KafkaConsumer
 
 from common.units import quantity_kind_for
 
-from registry.models import Device, Measurement, MeasurementType, Sensor, TelemetryVariant
+from registry.models import Device, DeviceTelemetryVariant, Measurement, MeasurementType, TelemetryVariant
 
 log = structlog.get_logger()
 
 
 class Command(BaseCommand):
-    help = "Consume mesh.sensor_discovery.v1 and upsert Sensor/Measurement rows"
+    help = "Consume mesh.sensor_discovery.v1 and upsert DeviceTelemetryVariant/Measurement rows"
 
     def handle(self, *args, **options):
         bootstrap_servers = os.environ["KAFKA_BOOTSTRAP"]
@@ -60,9 +60,11 @@ class Command(BaseCommand):
             return
         payload_kind = event["payload_kind"]
         telemetry_variant, _ = TelemetryVariant.objects.get_or_create(payload_kind=payload_kind)
-        sensor, _ = Sensor.objects.get_or_create(device=device, telemetry_variant=telemetry_variant)
-        sensor.last_seen = timezone.now()
-        sensor.save(update_fields=["last_seen"])
+        device_telemetry_variant, _ = DeviceTelemetryVariant.objects.get_or_create(
+            device=device, telemetry_variant=telemetry_variant
+        )
+        device_telemetry_variant.last_seen = timezone.now()
+        device_telemetry_variant.save(update_fields=["last_seen"])
         # This is optional because we either get it from the protos, or from the
         # computed channels (derived or quality)
         field_units = event.get("field_units") or {}
@@ -71,7 +73,9 @@ class Command(BaseCommand):
                 payload_kind=payload_kind, field_name=field
             )
             Command._apply_unit(measurement_type, field_units.get(field))
-            measurement, _ = Measurement.objects.get_or_create(sensor=sensor, measurement_type=measurement_type)
+            measurement, _ = Measurement.objects.get_or_create(
+                device_telemetry_variant=device_telemetry_variant, measurement_type=measurement_type
+            )
             measurement.last_seen = timezone.now()
             measurement.save(update_fields=["last_seen"])
 
