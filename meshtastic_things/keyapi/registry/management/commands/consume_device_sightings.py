@@ -56,7 +56,9 @@ class Command(BaseCommand):
         except (Mesh.DoesNotExist, ValueError):
             return
         device, _ = Device.objects.get_or_create(
-            mesh=mesh, device_id=int(event["device_id"]), defaults={"is_node": True, "is_allowed": True}
+            # is_gateway defaults to False on the model (an auto-discovered
+            # sighting is always a node)
+            mesh=mesh, device_id=int(event["device_id"]), defaults={"is_allowed": True}
         )
         device.last_seen = timezone.now()
         update_fields = ["last_seen"]

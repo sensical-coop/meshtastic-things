@@ -1,8 +1,5 @@
 from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
 
-# TODO Review
-
-
 class OwnerRateThrottle(SimpleRateThrottle):
     """Throttles authenticated traffic per Owner"""
 

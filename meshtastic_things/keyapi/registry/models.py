@@ -121,9 +121,8 @@ class Device(models.Model):
     device_id = models.BigIntegerField(db_index=True)
     mesh = models.ForeignKey(Mesh, on_delete=models.CASCADE, related_name="devices")
     label = models.CharField(max_length=255, null=True, blank=True)
-    # TODO - Fix, these could be just "is_gateway". If it's not gateway, it's a node
+    # A Device is either a gateway or a node
     is_gateway = models.BooleanField(default=False)
-    is_node = models.BooleanField(default=False)
     is_allowed = models.BooleanField(default=True)
     # Password field: write-only
     admin_keys_b64 = models.JSONField(default=list, blank=True, validators=[_max_three_admin_keys])
@@ -149,10 +148,6 @@ class Device(models.Model):
     class Meta:
         db_table = "devices"
         constraints = [
-            models.CheckConstraint(
-                check=(models.Q(is_gateway=True, is_node=False) | models.Q(is_gateway=False, is_node=True)),
-                name="device_is_gateway_xor_node",
-            ),
             models.UniqueConstraint(
                 fields=["device_id"], condition=models.Q(is_allowed=True), name="uq_devices_device_id_allowed"
             ),

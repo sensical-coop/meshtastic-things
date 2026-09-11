@@ -46,7 +46,6 @@ class DeviceAdmin(admin.ModelAdmin):
         "label",
         "mesh",
         "is_gateway",
-        "is_node",
         "is_allowed",
         "name",
         "short_name",
@@ -57,7 +56,7 @@ class DeviceAdmin(admin.ModelAdmin):
         "last_seen",
         "created_at",
     )
-    list_filter = ("is_gateway", "is_node", "is_allowed")
+    list_filter = ("is_gateway", "is_allowed")
     exclude = ("admin_keys_b64",)
     readonly_fields = ("id", "created_at", "updated_at")
     search_fields = ("device_id", "label")

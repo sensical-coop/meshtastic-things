@@ -214,7 +214,7 @@ class OwnerMeView(APIView):
         """Publishes delete/unreject for every device before removing owner"""
         devices = Device.objects.filter(mesh__owner=request.user)
         gateways = list(devices.filter(is_gateway=True, is_allowed=True))
-        rejected_nodes = list(devices.filter(is_node=True, is_allowed=False))
+        rejected_nodes = list(devices.filter(is_gateway=False, is_allowed=False))
         publisher = get_publisher()
         for gateway in gateways:
             try:
@@ -342,7 +342,7 @@ class MeshDetailView(APIView):
         mesh = _get_mesh_or_404(mesh_id)
         _require_mesh_ownership(mesh, request.user)
         gateways = list(mesh.devices.filter(is_gateway=True, is_allowed=True))
-        rejected_nodes = list(mesh.devices.filter(is_node=True, is_allowed=False))
+        rejected_nodes = list(mesh.devices.filter(is_gateway=False, is_allowed=False))
         publisher = get_publisher()
         for gateway in gateways:
             try:
@@ -405,7 +405,6 @@ class DeviceListCreateView(APIView):
                 device_id=data["device_id"],
                 mesh=mesh,
                 is_gateway=data["is_gateway"],
-                is_node=data["is_node"],
                 label=data.get("label"),
                 admin_keys_b64=data.get("admin_keys_b64", []),
                 latitude=data.get("latitude"),
@@ -467,7 +466,6 @@ class DeviceDetailView(APIView):
             if updated.location_overridden != pinned:
                 updated.location_overridden = pinned
                 override_fields.append("location_overridden")
-        # TODO - check if needed
         if nodeinfo_keys_present:
             cleared = nodeinfo_keys_all_present and all(getattr(updated, f) is None for f in nodeinfo_fields)
             pinned = not cleared
@@ -513,7 +511,7 @@ class DeviceDetailView(APIView):
         try:
             if device.is_gateway and device.is_allowed:
                 publisher.publish_gateway_delete(device)
-            elif device.is_node and not device.is_allowed:
+            elif not device.is_gateway and not device.is_allowed:
                 publisher.publish_node_unreject(device)
         except Exception as e:
             raise BadGateway(f"Failed to publish device deletion, device NOT removed: {e}")

@@ -116,8 +116,8 @@ class DeviceCreateSerializer(serializers.Serializer):
 
     device_id = serializers.IntegerField()
     mesh_id = serializers.UUIDField()
-    is_gateway = serializers.BooleanField(default=False)
-    is_node = serializers.BooleanField(default=False)
+    # Required
+    is_gateway = serializers.BooleanField()
     label = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
     admin_keys_b64 = serializers.ListField(
         child=serializers.CharField(),
@@ -155,7 +155,6 @@ class DeviceReadSerializer(serializers.ModelSerializer):
             "mesh_id",
             "label",
             "is_gateway",
-            "is_node",
             "is_allowed",
             "latitude",
             "longitude",
