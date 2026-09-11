@@ -1,0 +1,50 @@
+services:
+  caddy:
+    mem_limit: 128m
+    container_name: caddy
+    image: caddy:2-alpine
+    restart: unless-stopped
+    env_file: "../.env"
+    # Caddy is the one public entry point
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../Caddyfile:/etc/caddy/Caddyfile:ro
+      # Basic-auth credentials for the admin UIs
+      - ../caddy/credentials:/etc/caddy/credentials:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      key_management_api:
+        condition: service_healthy
+      query_api:
+        condition: service_healthy
+
+  # full-only: Kafka topic browser, not needed for a minimal deployment
+  kafbat-ui:
+    profiles: ["full"]
+    mem_limit: 1024m
+    container_name: kafbat-ui
+    image: ghcr.io/kafbat/kafka-ui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DYNAMIC_CONFIG_ENABLED: true
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_METRICS_PORT: 9997
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  caddy_data:
+  caddy_config:

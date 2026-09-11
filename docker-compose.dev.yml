@@ -1,0 +1,84 @@
+# Local development
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile full up -d
+
+services:
+  caddy:
+    ports: !override
+      - "80:80"
+      - "443:443"
+      # Admin UIs (Flink, Kafka UI, InfluxDB, MinIO console) - dev-only.
+      - "8181:8181"
+      - "8182:8182"
+      - "8183:8183"
+      - "8184:8184"
+
+  key_management_api:
+    ports: !override
+      - ${KEYAPI__PORT}:${KEYAPI__PORT}
+    environment:
+      DJANGO_SETTINGS_MODULE: keyapi_project.settings.dev
+
+  query_api:
+    ports: !override
+      - ${QUERYAPI__PORT}:${QUERYAPI__PORT}
+    environment:
+      DJANGO_SETTINGS_MODULE: queryapi_project.settings.dev
+
+  # Admin UIs and datastores
+  influxdb:
+    ports: !override
+      - "8086:8086"
+
+  jobmanager:
+    ports: !override
+      - "8081:8081"
+
+  kafbat-ui:
+    ports: !override
+      - "8080:8080"
+
+  kafka:
+    ports: !override
+      - "9092:9092"
+      - "9093:9093"
+      - "29092:29092"
+
+  minio:
+    ports: !override
+      - "9000:9000"
+      - "9001:9001"
+
+  influxdb_writer:
+    ports: !override
+      - ${INFLUXDB_WRITER__HEALTHCHECK_PORT}:${INFLUXDB_WRITER__HEALTHCHECK_PORT}
+
+  s3_writer:
+    ports: !override
+      - ${S3_WRITER__HEALTHCHECK_PORT}:${S3_WRITER__HEALTHCHECK_PORT}
+
+  key_management_device_consumer:
+    environment:
+      DJANGO_SETTINGS_MODULE: keyapi_project.settings.dev
+
+  key_management_sensor_discovery_consumer:
+    environment:
+      DJANGO_SETTINGS_MODULE: keyapi_project.settings.dev
+
+  key_management_quality_alarms_consumer:
+    environment:
+      DJANGO_SETTINGS_MODULE: keyapi_project.settings.dev
+
+  query_api_owner_auth_consumer:
+    environment:
+      DJANGO_SETTINGS_MODULE: queryapi_project.settings.dev
+
+  # Local dev SMTP
+  mailhog:
+    mem_limit: 128m
+    container_name: mailhog
+    image: mailhog/mailhog
+    restart: unless-stopped
+    ports:
+      - "8025:8025" # web UI
+      - "1025:1025" # SMTP

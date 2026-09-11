@@ -1,0 +1,98 @@
+x-pipeline-image: &pipeline-image
+  image: meshtastic-things/pipeline:latest
+  build: ../meshtastic_things
+
+services:
+  mqtt_kafka_bridge:
+    mem_limit: 256m
+    <<: *pipeline-image
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+    env_file: "../.env"
+    restart: unless-stopped
+    expose:
+      - ${MQTT_BRIDGE__HEALTH__PORT}
+    command: ["mqtt_kafka_bridge"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${MQTT_BRIDGE__HEALTH__PORT}/health"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    deploy:
+      replicas: ${MQTT_BRIDGE__REPLICAS:-1}
+
+  influxdb_writer:
+    mem_limit: 256m
+    container_name: influxdb-writer
+    <<: *pipeline-image
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+      influxdb:
+        condition: service_healthy
+    env_file: "../.env"
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${INFLUXDB_WRITER__HEALTHCHECK_PORT}:${INFLUXDB_WRITER__HEALTHCHECK_PORT}
+    command: ["kafka_influx_writer"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${INFLUXDB_WRITER__HEALTHCHECK_PORT}/health"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+  # full-only: the S3/Parquet archive
+  s3_writer:
+    profiles: ["full"]
+    mem_limit: 384m
+    container_name: s3-writer
+    <<: *pipeline-image
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+    env_file: "../.env"
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${S3_WRITER__HEALTHCHECK_PORT}:${S3_WRITER__HEALTHCHECK_PORT}
+    command: ["kafka_s3_writer"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${S3_WRITER__HEALTHCHECK_PORT}/health"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+  minio:
+    profiles: ["full"]
+    mem_limit: 768m
+    container_name: minio
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_WRITER__ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_WRITER__SECRET_KEY}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  minio_data:

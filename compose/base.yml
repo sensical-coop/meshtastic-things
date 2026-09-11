@@ -1,0 +1,118 @@
+services:
+  kafka:
+    mem_limit: 1600m
+    image: apache/kafka:latest
+    env_file: "../.env"
+    container_name: kafka
+    hostname: kafka
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9092:9092"     # external access
+      - "127.0.0.1:9093:9093"     # controller listener
+      - "127.0.0.1:29092:29092"   # controller listener
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Precreate every topic for the pipeline needs
+  kafka-topics-init:
+    mem_limit: 256m
+    container_name: kafka-topics-init
+    image: apache/kafka:latest
+    env_file: "../.env"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    # TODO - put this on a script
+    command:
+      - |
+        set -e
+        for topic in \
+          "$$MQTT_BRIDGE__KAFKA_TOPIC" \
+          "$$MQTT_BRIDGE__HEALTH__KAFKA_TOPIC" \
+          "$$PROTO_DECODE__KAFKA_TOPIC" \
+          "$${KEYAPI__DEVICES_KAFKA_TOPIC:-mesh.devices.v1}" \
+          "$${KEYAPI__SENSOR_DISCOVERY_KAFKA_TOPIC:-mesh.sensor_discovery.v1}" \
+          "$${KEYAPI__OWNER_AUTH_REVOCATIONS_KAFKA_TOPIC:-mesh.owner_auth_revocations.v1}" \
+          "$$CALIBRATED__KAFKA_TOPIC" \
+          "$$PATTERN_DETECTION__ALARMS_TOPIC" \
+        ; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 \
+            --create --if-not-exists --topic "$$topic" \
+            --partitions 1 --replication-factor 1
+        done
+        # Changelogs, not event streams - each is keyed by an identity (gateway
+        # ID, mesh_id:device_id, node_id:field) and only the latest value per
+        # key matters. Compaction (not the default delete-based retention)
+        # keeps a cold Flink restart's from-earliest replay complete forever,
+        # instead of silently losing any key untouched since the retention
+        # window - see docs/architecture.md#reverse-proxy's neighboring Kafka
+        # topics table and decode_job.py's GATEWAY_KEY_STATE/NODE_REJECTED_STATE.
+        for topic in \
+          "$${KEYAPI__KAFKA_TOPIC:-mesh.keys.v1}" \
+          "$${KEYAPI__NODE_REJECTIONS_KAFKA_TOPIC:-mesh.node_rejections.v1}" \
+          "$${KEYAPI__QUALITY_CONFIG_KAFKA_TOPIC:-mesh.quality_config.v1}" \
+          "$$CALIBRATION__KAFKA_TOPIC" \
+          "$$PATTERN_DETECTION__RULES_TOPIC" \
+        ; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 \
+            --create --if-not-exists --topic "$$topic" \
+            --partitions 1 --replication-factor 1 \
+            --config cleanup.policy=compact
+        done
+
+  influxdb:
+    mem_limit: 1024m
+    container_name: influxdb
+    image: influxdb:2.7
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8086:8086"
+    volumes:
+      - influx_data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  postgres:
+    mem_limit: 512m
+    container_name: postgres
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Shared cache for keyapi and queryapi
+  redis:
+    mem_limit: 256m
+    container_name: meshtastic-things-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  kafka_data:
+  influx_data:
+  postgres_data:

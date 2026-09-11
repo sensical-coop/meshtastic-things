@@ -1,0 +1,147 @@
+x-flink-image: &flink-image
+  image: meshtastic-things/flink:latest
+  build:
+    context: ../meshtastic_things
+    dockerfile: flink/Dockerfile
+
+x-flink-state-properties: &flink-state-properties |
+  state.backend: rocksdb
+  state.checkpoints.dir: file:///opt/flink/checkpoints
+  state.savepoints.dir: file:///opt/flink/savepoints
+  execution.checkpointing.interval: 10s
+  execution.checkpointing.mode: EXACTLY_ONCE
+
+  taskmanager.numberOfTaskSlots: 6
+
+  jobmanager.memory.process.size: 1024m
+  taskmanager.memory.process.size: 1280m
+
+x-flink-client-properties: &flink-client-properties |
+  state.backend: rocksdb
+  state.checkpoints.dir: file:///opt/flink/checkpoints
+  state.savepoints.dir: file:///opt/flink/savepoints
+  execution.checkpointing.interval: 10s
+  execution.checkpointing.mode: EXACTLY_ONCE
+  rest.address: jobmanager
+
+services:
+  jobmanager:
+    mem_limit: 1600m
+    <<: *flink-image
+    container_name: jobmanager
+    command: jobmanager
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: jobmanager
+      FLINK_PROPERTIES: *flink-state-properties
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/config"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  taskmanager:
+    mem_limit: 3600m
+    <<: *flink-image
+    container_name: taskmanager
+    command: taskmanager
+    restart: unless-stopped
+    depends_on:
+      jobmanager:
+        condition: service_healthy
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: jobmanager
+      FLINK_PROPERTIES: *flink-state-properties
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://jobmanager:8081/taskmanagers | grep -q '\"id\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  flink-job:
+    mem_limit: 1024m
+    container_name: flink-job
+    env_file: "../.env"
+    <<: *flink-image
+    restart: "no"
+    command: ["./submit-job.sh", "decode_job.py", "mesh-decode-decrypt"]
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: jobmanager
+      FLINK_PROPERTIES: *flink-client-properties
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+      jobmanager:
+        condition: service_healthy
+      key_management_api:
+        condition: service_healthy
+
+  # full-only
+  calibration-job:
+    profiles: ["full"]
+    mem_limit: 1024m
+    container_name: calibration-job
+    env_file: "../.env"
+    <<: *flink-image
+    restart: "no"
+    command: ["./submit-job.sh", "calibration_job.py", "mesh-calibration"]
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: jobmanager
+      FLINK_PROPERTIES: *flink-client-properties
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+      jobmanager:
+        condition: service_healthy
+      flink-job:
+        condition: service_completed_successfully
+
+  pattern-detection-job:
+    profiles: ["full"]
+    mem_limit: 1024m
+    container_name: pattern-detection-job
+    env_file: "../.env"
+    <<: *flink-image
+    restart: "no"
+    command: ["./submit-job.sh", "pattern_detection_job.py", "mesh-pattern-detection"]
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: jobmanager
+      FLINK_PROPERTIES: *flink-client-properties
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+      jobmanager:
+        condition: service_healthy
+      calibration-job:
+        condition: service_completed_successfully
+
+  absence-detection-job:
+    profiles: ["full"]
+    mem_limit: 1024m
+    container_name: absence-detection-job
+    env_file: "../.env"
+    <<: *flink-image
+    restart: "no"
+    command: ["./submit-job.sh", "absence_detection_job.py", "mesh-absence-detection"]
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: jobmanager
+      FLINK_PROPERTIES: *flink-client-properties
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+      jobmanager:
+        condition: service_healthy
+      pattern-detection-job:
+        condition: service_completed_successfully

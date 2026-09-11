@@ -1,0 +1,51 @@
+x-queryapi-image: &queryapi-image
+  image: meshtastic-things/queryapi:latest
+  build:
+    context: ../meshtastic_things
+    dockerfile: queryapi/Dockerfile
+
+services:
+  query_api:
+    environment:
+      DJANGO_SETTINGS_MODULE: queryapi_project.settings.prod
+
+    mem_limit: 512m
+    container_name: query-api
+    <<: *queryapi-image
+    depends_on:
+      influxdb:
+        condition: service_healthy
+      key_management_api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: "../.env"
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${QUERYAPI__PORT}:${QUERYAPI__PORT}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${QUERYAPI__PORT}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  query_api_owner_auth_consumer:
+    environment:
+      DJANGO_SETTINGS_MODULE: queryapi_project.settings.prod
+
+    mem_limit: 256m
+    container_name: query-api-owner-auth-consumer
+    <<: *queryapi-image
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+      query_api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: "../.env"
+    restart: unless-stopped
+    command: ["python", "manage.py", "consume_owner_auth_revocations"]

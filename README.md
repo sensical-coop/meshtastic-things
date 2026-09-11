@@ -33,7 +33,7 @@ MQTT ──> bridge ──> mesh.telemetry.raw.v1 ──> decode/decrypt ──>
 
 ```bash
 cp env.example .env    # then see docs/README.md#quick-start
-docker compose up -d
+docker compose --profile full up -d
 ```
 
 **Note**: For iterations on protobufs, install `meshtastic` locally as editable and
