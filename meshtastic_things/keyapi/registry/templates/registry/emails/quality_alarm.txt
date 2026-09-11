@@ -1,0 +1,17 @@
+Hi {{ name }},
+
+A data-quality check was triggered on one of your devices.
+
+  Device:   {{ device_label }} (node {{ device_id }})
+  Mesh:     {{ mesh_label }}
+  Check:    {{ detector_summary }} ({{ detector }}){% if channel %}
+  Channel:  {{ channel }}{% endif %}
+  Detected: {{ triggered_at }}
+
+{{ message }}
+{% if detector == "absence" %}
+This means the device has not published data recently. If your device batches
+readings, it may still deliver this period later, so check data completeness.
+{% endif %}
+Note: you will not get another email about this same check on this device for at
+least {{ cooldown_hours }} hour(s).

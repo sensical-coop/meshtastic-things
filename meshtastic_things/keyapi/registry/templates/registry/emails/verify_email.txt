@@ -1,0 +1,8 @@
+Hi {{ name }},
+
+Thanks for registering with the Meshtastic Key Management API. Please verify
+your email address within {{ ttl_hours }} hours by visiting:
+
+{{ verify_link }}
+
+If you didn't request this, you can safely ignore this email.
