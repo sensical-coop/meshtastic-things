@@ -184,8 +184,7 @@ class DeviceReadSerializer(serializers.ModelSerializer):
 
 
 class DeviceUpdateSerializer(serializers.ModelSerializer):
-    # TODO - Fix, role can be updated if the user changes it on the device itself
-    """device_id/mesh/role are fixed at creation"""
+    """device_id/mesh are fixed at creation. Role is editable"""
 
     admin_keys_b64 = serializers.ListField(
         child=serializers.CharField(),
@@ -284,16 +283,6 @@ class TelemetryVariantReadSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class TelemetryVariantCreateSerializer(serializers.ModelSerializer):
-    """POST /telemetry-variants - superuser-only"""
-
-    payload_kind = serializers.CharField(validators=[])
-
-    class Meta:
-        model = TelemetryVariant
-        fields = ["payload_kind", "name", "model", "datasheet_url", "description"]
-
-
 class TelemetryVariantUpdateSerializer(serializers.ModelSerializer):
     """PUT /telemetry-variants/{id} - payload_kind is immutable"""
 
@@ -383,7 +372,6 @@ class PostprocessingStepSerializer(serializers.ModelSerializer):
 
 
 class PostprocessingBlueprintSerializer(serializers.ModelSerializer):
-    # TODO - Fix, steps should be orderable by their inputs and outputs as a tree
     """Steps are nested in read and write"""
 
     steps = PostprocessingStepSerializer(many=True)

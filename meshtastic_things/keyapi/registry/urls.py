@@ -30,7 +30,7 @@ urlpatterns = [
     path(
         "telemetry-variant-measurements/<uuid:telemetry_variant_measurement_id>",
         views.TelemetryVariantMeasurementDetailView.as_view(),
-    ), # TODO - needed?
+    ),
     path("algorithms", views.AlgorithmListView.as_view()),
     path("postprocessing-blueprints", views.PostprocessingBlueprintListCreateView.as_view()),
     path("postprocessing-blueprints/<uuid:blueprint_id>", views.PostprocessingBlueprintDetailView.as_view()),

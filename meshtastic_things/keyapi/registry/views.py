@@ -45,7 +45,6 @@ from .serializers import (
     PostprocessingBlueprintSerializer,
     DeviceMeasurementSerializer,
     DeviceTelemetryVariantSerializer,
-    TelemetryVariantCreateSerializer,
     TelemetryVariantMeasurementReadSerializer,
     TelemetryVariantMeasurementUpdateSerializer,
     TelemetryVariantReadSerializer,
@@ -648,24 +647,17 @@ class MeasurementTypeDetailView(APIView):
 
 
 class TelemetryVariantListCreateView(APIView):
-    """Full CRUD on the shared catalog
-    GET is open to any verified owner, writes are superuser-only"""
+    """GET only
+    TelemetryVariants are always created dynamically, either by
+    sensor discovery (consume_sensor_discovery.py) or manage.py
+    seed_measurement_catalog. See PUT /telemetry-variants/{id}
+    for curation.
+    Open to any verified owner."""
 
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request):
         return Response(TelemetryVariantReadSerializer(TelemetryVariant.objects.all(), many=True).data)
-
-    def post(self, request):
-        # TODO - Not really needed
-        _require_superuser(request)
-        serializer = TelemetryVariantCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            telemetry_variant = serializer.save()
-        except IntegrityError:
-            raise Conflict(f"TelemetryVariant for {serializer.validated_data['payload_kind']} already exists")
-        return Response(TelemetryVariantReadSerializer(telemetry_variant).data, status=status.HTTP_201_CREATED)
 
 
 class TelemetryVariantDetailView(APIView):
