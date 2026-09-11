@@ -259,9 +259,11 @@ class OwnerRotateKeyView(APIView):
 
 def _devices_for_owner(owner: Owner) -> list[dict]:
     """Every Device the given owner may see"""
-    # TODO - Fix, a superuser can query any owner's devices
-    qs = Device.objects.all() if owner.is_superuser else Device.objects.filter(mesh__owner_id=owner.id)
-    return DeviceReadSerializer(qs.order_by("mesh_id", "device_id"), many=True).data
+    qs = Device.objects.select_related("mesh")
+    qs = qs.all() if owner.is_superuser else qs.filter(mesh__owner_id=owner.id)
+    return DeviceReadSerializer(
+        qs.order_by("mesh_id", "device_id"), many=True, context={"viewer_id": owner.id}
+    ).data
 
 
 class OwnerDeviceIdsView(APIView):
@@ -286,7 +288,7 @@ def _require_mesh_ownership(mesh: Mesh, owner: Owner) -> None:
 
 def _get_device_or_404(id) -> Device:
     try:
-        return Device.objects.get(pk=id)
+        return Device.objects.select_related("mesh").get(pk=id)
     except (Device.DoesNotExist, ValueError, TypeError):
         raise NotFound("Device not found")
 
@@ -295,16 +297,18 @@ class MeshListCreateView(APIView):
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request):
-        """Every owner's meshes for a superuser, otherwise only the caller's own."""
-        # TODO - Fix, a superuser can query any owner's meshes
+        """Every owner's meshes for a superuser, otherwise only the caller's
+        own. psk_b64 is only included for meshes the caller actually owns"""
         qs = Mesh.objects.all() if request.user.is_superuser else Mesh.objects.filter(owner=request.user)
-        return Response(MeshSerializer(qs, many=True).data)
+        return Response(MeshSerializer(qs, many=True, context={"viewer_id": request.user.id}).data)
 
     def post(self, request):
         serializer = MeshSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         mesh = serializer.save(owner=request.user)
-        return Response(MeshSerializer(mesh).data, status=status.HTTP_201_CREATED)
+        return Response(
+            MeshSerializer(mesh, context={"viewer_id": request.user.id}).data, status=status.HTTP_201_CREATED
+        )
 
 
 class MeshDetailView(APIView):
@@ -313,7 +317,7 @@ class MeshDetailView(APIView):
     def get(self, request, mesh_id):
         mesh = _get_mesh_or_404(mesh_id)
         _require_mesh_ownership(mesh, request.user)
-        return Response(MeshSerializer(mesh).data)
+        return Response(MeshSerializer(mesh, context={"viewer_id": request.user.id}).data)
 
     def put(self, request, mesh_id):
         """Changing psk_b64 re-publishes an upsert for every allowed gateway on
@@ -334,7 +338,7 @@ class MeshDetailView(APIView):
                     updated.psk_b64 = previous_psk
                     updated.save(update_fields=["psk_b64"])
                     raise BadGateway(f"Failed to publish key change, rolled back: {e}")
-        return Response(MeshSerializer(updated).data)
+        return Response(MeshSerializer(updated, context={"viewer_id": request.user.id}).data)
 
     def delete(self, request, mesh_id):
         """Publishes delete/unreject and, if it doesn't fail,
@@ -366,7 +370,11 @@ class MeshDevicesView(APIView):
     def get(self, request, mesh_id):
         mesh = _get_mesh_or_404(mesh_id)
         _require_mesh_ownership(mesh, request.user)
-        return Response(DeviceReadSerializer(mesh.devices.all(), many=True).data)
+        return Response(
+            DeviceReadSerializer(
+                mesh.devices.select_related("mesh").all(), many=True, context={"viewer_id": request.user.id}
+            ).data
+        )
 
 
 class DeviceListCreateView(APIView):
@@ -376,22 +384,22 @@ class DeviceListCreateView(APIView):
         """Filters:
         - ?mesh_id=,
         - ?is_gateway=,
-        - ?is_node=,
         - ?is_allowed=,
         - ?has_postprocessing= what quality_worker uses
         to find devices with a blueprint attached"""
-        qs = Device.objects.all() if request.user.is_superuser else Device.objects.filter(mesh__owner=request.user)
+        qs = Device.objects.select_related("mesh")
+        qs = qs.all() if request.user.is_superuser else qs.filter(mesh__owner=request.user)
         mesh_id = request.query_params.get("mesh_id")
         if mesh_id:
             qs = qs.filter(mesh_id=mesh_id)
-        for flag in ("is_gateway", "is_node", "is_allowed"):
+        for flag in ("is_gateway", "is_allowed"):
             value = request.query_params.get(flag)
             if value is not None:
                 qs = qs.filter(**{flag: value.lower() in ("true", "1")})
         has_postprocessing = request.query_params.get("has_postprocessing")
         if has_postprocessing is not None:
             qs = qs.filter(postprocessing_blueprint__isnull=has_postprocessing.lower() not in ("true", "1"))
-        return Response(DeviceReadSerializer(qs, many=True).data)
+        return Response(DeviceReadSerializer(qs, many=True, context={"viewer_id": request.user.id}).data)
 
     def post(self, request):
         """Only the mesh owner may register a device. A device needs to be marked first as is_allowed = False to be taken over to another mesh."""
@@ -426,7 +434,10 @@ class DeviceListCreateView(APIView):
             except Exception as e:
                 device.delete()
                 raise BadGateway(f"Failed to publish gateway registration, rolled back: {e}")
-        return Response(DeviceReadSerializer(device).data, status=status.HTTP_201_CREATED)
+        return Response(
+            DeviceReadSerializer(device, context={"viewer_id": request.user.id}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class DeviceDetailView(APIView):
@@ -435,7 +446,7 @@ class DeviceDetailView(APIView):
     def get(self, request, id):
         device = _get_device_or_404(id)
         _require_mesh_ownership(device.mesh, request.user)
-        return Response(DeviceReadSerializer(device).data)
+        return Response(DeviceReadSerializer(device, context={"viewer_id": request.user.id}).data)
 
     def put(self, request, id):
         """is_allowed, location, and nodeinfo follow the sticky-override
@@ -501,7 +512,7 @@ class DeviceDetailView(APIView):
                 updated.save(update_fields=["is_allowed"])
                 action = "allow" if attempted_allowed else "reject"
                 raise BadGateway(f"Failed to publish device {action}, rolled back: {e}")
-        return Response(DeviceReadSerializer(updated).data)
+        return Response(DeviceReadSerializer(updated, context={"viewer_id": request.user.id}).data)
 
     def delete(self, request, id):
         """Publishes the matching Kafka delete/unreject first"""

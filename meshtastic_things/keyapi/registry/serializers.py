@@ -61,8 +61,6 @@ class OwnerWithApiKeySerializer(OwnerReadSerializer):
         fields = OwnerReadSerializer.Meta.fields + ["api_key"]
 
 
-# Password field: write-only everywhere
-# TODO - FIX, should be returned to owner (although not admin)
 _PSK_HELP = "Base64-encoded channel PSK"
 
 
@@ -70,12 +68,19 @@ class MeshSerializer(serializers.ModelSerializer):
 
     owner_id = serializers.UUIDField(read_only=True)
     # blank psk_b64 is mesh without encryption"
-    psk_b64 = serializers.CharField(write_only=True, allow_blank=True, help_text=_PSK_HELP)
+    psk_b64 = serializers.CharField(allow_blank=True, help_text=_PSK_HELP)
 
     class Meta:
         model = Mesh
         fields = ["id", "channel_id", "psk_b64", "label", "owner_id", "created_at", "updated_at"]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        viewer_id = self.context.get("viewer_id")
+        if viewer_id is None or viewer_id != instance.owner_id:
+            data.pop("psk_b64", None)
+        return data
 
 
 class MeshUpdateSerializer(serializers.ModelSerializer):
@@ -97,8 +102,6 @@ def _max_three_admin_keys(value):
     return value
 
 
-# Password field like Mesh.psk_b64
-# TODO - FIX, should be returned to owner (although not to admin)
 _ADMIN_KEYS_HELP = "Base64-encoded admin keys (up to 3). Warning: PUT replaces the whole list."
 
 
@@ -135,17 +138,15 @@ class DeviceCreateSerializer(serializers.Serializer):
     role = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
 
     def validate(self, attrs):
-        if attrs.get("is_gateway", False) == attrs.get("is_node", False):
-            raise serializers.ValidationError("Exactly one of is_gateway or is_node must be true")
         return _validate_location_pair(self, attrs)
 
 
 class DeviceReadSerializer(serializers.ModelSerializer):
-    # TODO Fix - For the owner, they should be able to see admin_keys (not for admin)
-    """Never returns admin_keys_b64"""
+    """admin_keys_b64 is ONLY shown to the device's actual mesh owner (superusers can't see this)"""
 
     mesh_id = serializers.UUIDField(read_only=True)
     postprocessing_blueprint_id = serializers.UUIDField(read_only=True)
+    admin_keys_b64 = serializers.ListField(child=serializers.CharField(), read_only=True)
 
     class Meta:
         model = Device
@@ -156,6 +157,7 @@ class DeviceReadSerializer(serializers.ModelSerializer):
             "label",
             "is_gateway",
             "is_allowed",
+            "admin_keys_b64",
             "latitude",
             "longitude",
             "location_overridden",
@@ -172,6 +174,13 @@ class DeviceReadSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        viewer_id = self.context.get("viewer_id")
+        if viewer_id is None or viewer_id != instance.mesh.owner_id:
+            data.pop("admin_keys_b64", None)
+        return data
 
 
 class DeviceUpdateSerializer(serializers.ModelSerializer):

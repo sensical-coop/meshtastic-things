@@ -124,7 +124,8 @@ class Device(models.Model):
     # A Device is either a gateway or a node
     is_gateway = models.BooleanField(default=False)
     is_allowed = models.BooleanField(default=True)
-    # Password field: write-only
+    # DeviceReadSerializer only shows this to the
+    # device's actual mesh owner
     admin_keys_b64 = models.JSONField(default=list, blank=True, validators=[_max_three_admin_keys])
     # Optional Blueprint
     postprocessing_blueprint = models.ForeignKey(
