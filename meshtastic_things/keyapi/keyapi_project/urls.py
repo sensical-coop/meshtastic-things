@@ -9,7 +9,7 @@ from registry.gateway_schema import GatewaySchemaView
 
 
 class KeyapiSchemaView(GatewayAwareSchemaView):
-    """`servers` ordered by the origin of the request"""
+    """Return this service's OpenAPI document."""
 
     gateway_prefix = MANAGEMENT_PREFIX
     direct_url = settings.SPECTACULAR_SETTINGS["SERVERS"][-1]["url"]

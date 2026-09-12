@@ -8,12 +8,15 @@ from common.channels import channel_name, origin_of_measurement
 
 from .influx_client import get_client
 from .measurement_catalog import get_measurement_types
-from .serializers import LatestReadingsResponseSerializer, TimeseriesResponseSerializer
+from .serializers import (
+    DeviceMetricsResponseSerializer,
+    LatestReadingsResponseSerializer,
+    TimeseriesResponseSerializer,
+)
 
 
 def _forwarded_auth_header(request) -> dict:
-    """Reconstructs the caller's Authorization header for calling keyapi
-    GET /measurement-types"""
+    """Rebuild the caller's Authorization header for the measurement catalog lookup."""
     header = request.META.get("HTTP_AUTHORIZATION")
     if header:
         return {"Authorization": header}
@@ -22,7 +25,7 @@ def _forwarded_auth_header(request) -> dict:
 
 
 def _require_owned_device(request, mesh_id, node_id: int) -> None:
-    """Can't distinguish "doesn't exist" from "not yours"."""
+    """Reject a device the caller does not own, without revealing whether it exists."""
     if not request.user.is_superuser and (str(mesh_id), node_id) not in request.user.devices:
         raise NotFound("Device not found")
 
@@ -35,6 +38,8 @@ def _resolve_device_uuid(request, device_uuid) -> tuple[str, int]:
 
 
 class HealthView(APIView):
+    """Report whether the service and the timeseries database are reachable."""
+
     # Infra probe, not sensitive data.
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -50,6 +55,22 @@ class HealthView(APIView):
 
 
 class TimeseriesView(APIView):
+    """Return a device's readings for one measurement over a time range.
+
+    Downsampling covers numeric fields only, so text fields such as
+    `timestamp_quality` are left out whenever `window` is set.
+
+    Args:
+        measurement: Measurement to read, for example `environment_metrics`. Required.
+        field: Single field within the measurement. Defaults to every field.
+        start: Start of the range, as a relative duration. Defaults to `-1h`.
+        stop: End of the range, or `now()`. Defaults to `now()`.
+        window: Bucket size to downsample into, for example `6h`. Off by default.
+        agg: Aggregate applied to each bucket, one of `mean`, `max`, `min`,
+            `last`, `first`, `sum` or `count`. Defaults to `mean` and applies
+            only when `window` is set.
+    """
+
     def get(self, request, mesh_id, node_id):
         _require_owned_device(request, mesh_id, node_id)
         params = request.query_params
@@ -74,7 +95,15 @@ class TimeseriesView(APIView):
 
 
 class LatestView(APIView):
-    """If no ?measurement= returns latest values across every field reported"""
+    """Return a device's most recent readings.
+
+    Without `measurement`, every field the device has reported comes back in
+    one call, each annotated with its unit from the measurement catalog.
+
+    Args:
+        measurement: Restrict to one measurement. Defaults to every measurement.
+        lookback: How far back to search for a value. Defaults to `-30d`.
+    """
 
     def get(self, request, mesh_id, node_id):
         _require_owned_device(request, mesh_id, node_id)
@@ -107,8 +136,42 @@ class LatestView(APIView):
         return Response(LatestReadingsResponseSerializer(body).data)
 
 
+class MetricsView(APIView):
+    """Return data-quality figures for a device over a time range.
+
+    Covers the number of readings recorded, alarms raised per detector, the
+    share of readings within their plausible range, and how complete each
+    channel was. Figures stay empty until the quality checks have run for the
+    device.
+
+    Args:
+        start: Start of the range, as a relative duration. Defaults to `-1h`.
+        stop: End of the range, or `now()`. Defaults to `now()`.
+    """
+
+    def get(self, request, mesh_id, node_id):
+        _require_owned_device(request, mesh_id, node_id)
+        params = request.query_params
+        start = params.get("start", "-1h")
+        stop = params.get("stop", "now()")
+        try:
+            metrics = get_client().device_metrics(mesh_id, node_id, start, stop)
+        except ValueError as e:
+            raise ValidationError(str(e))
+        body = {"mesh_id": mesh_id, "node_id": node_id, "start": start, "stop": stop, **metrics}
+        return Response(DeviceMetricsResponseSerializer(body).data)
+
+
+class DeviceMetricsView(MetricsView):
+    """Data-quality figures for a device, addressed by its registration ID."""
+
+    def get(self, request, device_uuid):
+        mesh_id, node_id = _resolve_device_uuid(request, device_uuid)
+        return super().get(request, mesh_id, node_id)
+
+
 class DeviceTimeseriesView(TimeseriesView):
-    """Same query as TimeseriesView, addressed by keyapi's device UUID."""
+    """Readings over a time range, addressed by the device's registration ID."""
 
     def get(self, request, device_uuid):
         mesh_id, node_id = _resolve_device_uuid(request, device_uuid)
@@ -116,7 +179,7 @@ class DeviceTimeseriesView(TimeseriesView):
 
 
 class DeviceLatestView(LatestView):
-    """Same query as LatestView, addressed by keyapi's device UUID."""
+    """Most recent readings, addressed by the device's registration ID."""
 
     def get(self, request, device_uuid):
         mesh_id, node_id = _resolve_device_uuid(request, device_uuid)

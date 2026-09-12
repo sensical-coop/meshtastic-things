@@ -5,7 +5,7 @@ from common.schema import GatewayAwareDocsView, GatewayAwareSchemaView
 
 
 class QueryapiSchemaView(GatewayAwareSchemaView):
-    """`servers` ordered by the origin of the request arrived"""
+    """Return this service's OpenAPI document."""
 
     gateway_prefix = DATA_PREFIX
     direct_url = settings.SPECTACULAR_SETTINGS["SERVERS"][-1]["url"]

@@ -3,9 +3,7 @@
 	handle / {
 		header Content-Type application/json
 		respond `{
-  "name": "Meshtastic Things gateway",
-  "schema": "/schema",
-  "docs": "/docs",
+  "name": "Meshtastic Things",
   "services": [
     {
       "name": "management",
@@ -13,7 +11,8 @@
       "base": "/management",
       "schema": "/management/schema",
       "docs": "/management/docs",
-      "health": "/management/health"
+      "health": "/management/health",
+      "metrics": "/management/metrics"
     },
     {
       "name": "data",

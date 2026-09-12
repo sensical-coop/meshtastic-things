@@ -28,6 +28,13 @@ class OwnerPublicSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class MetricsResponseSerializer(serializers.Serializer):
+    devices = serializers.IntegerField()
+    owners = serializers.IntegerField()
+    meshes = serializers.IntegerField()
+    active_gateways = serializers.IntegerField()
+
+
 class OwnerReadSerializer(serializers.ModelSerializer):
     """Includes email"""
 

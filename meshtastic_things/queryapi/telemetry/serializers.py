@@ -36,3 +36,22 @@ class LatestReadingsResponseSerializer(serializers.Serializer):
     readings = LatestReadingSerializer(many=True)
 
 
+class ChannelQualitySerializer(serializers.Serializer):
+    channel = serializers.CharField()
+    completeness_ratio = serializers.FloatField(allow_null=True)
+    observed = serializers.FloatField(allow_null=True)
+    expected = serializers.FloatField(allow_null=True)
+    largest_gap_seconds = serializers.FloatField(allow_null=True)
+
+
+class DeviceMetricsResponseSerializer(serializers.Serializer):
+    mesh_id = serializers.CharField()
+    node_id = serializers.IntegerField()
+    start = serializers.CharField()
+    stop = serializers.CharField()
+    points_ingested = serializers.FloatField()
+    plausibility_ratio = serializers.FloatField(allow_null=True)
+    alarms_by_detector = serializers.DictField(child=serializers.IntegerField())
+    channels = ChannelQualitySerializer(many=True)
+
+

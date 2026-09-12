@@ -42,6 +42,7 @@ from .serializers import (
     MeasurementTypeUpdateSerializer,
     MeshSerializer,
     MeshUpdateSerializer,
+    MetricsResponseSerializer,
     OwnerChangePasswordSerializer,
     OwnerCreateSerializer,
     OwnerLoginSerializer,
@@ -65,6 +66,8 @@ log = structlog.get_logger()
 
 
 class HealthView(APIView):
+    """Report whether the service and its database are reachable."""
+
     # Open and unthrottled
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -78,16 +81,36 @@ class HealthView(APIView):
         return Response({"status": "ok"})
 
 
-class OwnerListCreateView(APIView):
-    """POST /owners is the only unauthenticated write on this API"""
+class MetricsView(APIView):
+    """Return totals for registered owners, meshes, devices and active gateways."""
 
     permission_classes = [AllowAny]
 
     def get(self, request):
+        body = {
+            "devices": Device.objects.count(),
+            "owners": Owner.objects.count(),
+            "meshes": Mesh.objects.count(),
+            "active_gateways": Device.objects.filter(is_gateway=True, is_allowed=True).count(),
+        }
+        return Response(MetricsResponseSerializer(body).data)
+
+
+class OwnerListCreateView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        """List registered owners. Email addresses are not included."""
         owners = Owner.objects.all()
         return Response(OwnerPublicSerializer(owners, many=True).data)
 
     def post(self, request):
+        """Register an owner and return its API key.
+
+        The only write on this API that needs no authentication. The key is
+        shown in this response and cannot be retrieved again afterwards. A new
+        owner stays inactive until its email address is verified.
+        """
         serializer = OwnerCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         api_key = generate_api_key()
@@ -115,7 +138,7 @@ class OwnerListCreateView(APIView):
 
 
 class OwnerVerifyEmailView(APIView):
-    """GET /owners/verify-email?token=<token>"""
+    """Confirm an owner's email address using the token from the verification link."""
 
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -143,7 +166,7 @@ class OwnerVerifyEmailView(APIView):
 
 
 class OwnerResendVerificationView(APIView):
-    """For IsAuthenticated owners only"""
+    """Send a fresh verification email to the authenticated owner."""
 
     permission_classes = [IsAuthenticated]
     throttle_classes = [ResendVerificationThrottle]
@@ -165,7 +188,7 @@ class OwnerResendVerificationView(APIView):
 
 
 class CsrfCookieView(APIView):
-    """GET /owners/csrf-cookie"""
+    """Set the CSRF cookie a browser client needs before logging in."""
 
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -181,7 +204,10 @@ LOGIN_FAILED_RATE_WINDOW_SECONDS = 300
 
 
 class OwnerLoginView(APIView):
-    """POST /owners/login. Sets a session cookie"""
+    """Sign in with email and password, returning the owner profile and a session cookie.
+
+    Repeated failures from the same address are rate limited.
+    """
 
     permission_classes = [AllowAny]
 
@@ -210,7 +236,7 @@ class OwnerLoginView(APIView):
 
 
 class OwnerLogoutView(APIView):
-    """POST /owners/logout - clears the session."""
+    """End the current session."""
 
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -221,7 +247,11 @@ class OwnerLogoutView(APIView):
 
 
 class OwnerRequestPasswordResetView(APIView):
-    """POST /owners/request-password-reset"""
+    """Email a password reset link.
+
+    The response is the same whether or not the address is registered, so it
+    cannot be used to discover accounts.
+    """
 
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -243,7 +273,7 @@ class OwnerRequestPasswordResetView(APIView):
 
 
 class OwnerResetPasswordView(APIView):
-    """POST /owners/reset-password"""
+    """Set a new password using the token from a reset link."""
 
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -275,7 +305,7 @@ class OwnerResetPasswordView(APIView):
 
 
 class OwnerDetailView(APIView):
-    """Detail view similar to OwnerListCreateView.get"""
+    """Return one owner's public details. Email addresses are not included."""
 
     permission_classes = [AllowAny]
 
@@ -288,18 +318,20 @@ class OwnerDetailView(APIView):
 
 
 class OwnerMeView(APIView):
-    """GET /owners/me with token auth"""
-
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        """Return the authenticated owner's own record, including their devices."""
         data = OwnerReadSerializer(request.user).data
         data["devices"] = _devices_for_owner(request.user)
         return Response(data)
 
     def put(self, request):
-        """Changing email resets verification (is_active -> False and a new link
-        sent)"""
+        """Update the authenticated owner's name or email address.
+
+        Changing the address deactivates the account until the new one is
+        verified, and sends a fresh verification email.
+        """
         email_changing = "email" in request.data and request.data["email"] != request.user.email
         serializer = OwnerUpdateSerializer(request.user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -329,7 +361,11 @@ class OwnerMeView(APIView):
         return Response(OwnerReadSerializer(owner).data)
 
     def delete(self, request):
-        """Publishes delete/unreject for every device before removing owner"""
+        """Delete the authenticated owner, along with their meshes and devices.
+
+        Their gateways are deregistered from the decoder first, and nothing is
+        removed if that fails.
+        """
         devices = Device.objects.filter(mesh__owner=request.user)
         gateways = list(devices.filter(is_gateway=True, is_allowed=True))
         rejected_nodes = list(devices.filter(is_gateway=False, is_allowed=False))
@@ -356,7 +392,10 @@ class OwnerMeView(APIView):
 
 
 class OwnerRotateKeyView(APIView):
-    """Creates a new API key, invalidating the old one immediately"""
+    """Issue a new API key and revoke the previous one immediately.
+
+    The new key is shown in this response and cannot be retrieved again.
+    """
 
     permission_classes = [IsVerifiedOwner]
 
@@ -376,7 +415,7 @@ class OwnerRotateKeyView(APIView):
 
 
 class OwnerChangePasswordView(APIView):
-    """POST /owners/me/change-password"""
+    """Change the authenticated owner's password, confirming the current one first."""
 
     permission_classes = [IsVerifiedOwner]
 
@@ -396,7 +435,7 @@ class OwnerChangePasswordView(APIView):
 
 
 def _devices_for_owner(owner: Owner) -> list[dict]:
-    """Every Device the given owner may see"""
+    """Return the devices the given owner may access, or all of them for a superuser."""
     qs = Device.objects.select_related("mesh")
     qs = qs.all() if owner.is_superuser else qs.filter(mesh__owner_id=owner.id)
     return DeviceReadSerializer(
@@ -405,7 +444,8 @@ def _devices_for_owner(owner: Owner) -> list[dict]:
 
 
 class OwnerDeviceIdsView(APIView):
-    """Every Device the caller may see"""
+    """List the devices the authenticated owner may access."""
+
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request):
@@ -435,12 +475,15 @@ class MeshListCreateView(APIView):
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request):
-        """Every owner's meshes for a superuser, otherwise only the caller's
-        own. psk_b64 is only included for meshes the caller actually owns"""
+        """List the caller's meshes, or every mesh for a superuser.
+
+        The pre-shared key is included only for meshes the caller owns.
+        """
         qs = Mesh.objects.all() if request.user.is_superuser else Mesh.objects.filter(owner=request.user)
         return Response(MeshSerializer(qs, many=True, context={"viewer_id": request.user.id}).data)
 
     def post(self, request):
+        """Create a mesh owned by the caller."""
         serializer = MeshSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         mesh = serializer.save(owner=request.user)
@@ -453,13 +496,17 @@ class MeshDetailView(APIView):
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request, mesh_id):
+        """Return one mesh."""
         mesh = _get_mesh_or_404(mesh_id)
         _require_mesh_ownership(mesh, request.user)
         return Response(MeshSerializer(mesh, context={"viewer_id": request.user.id}).data)
 
     def put(self, request, mesh_id):
-        """Changing psk_b64 re-publishes an upsert for every allowed gateway on
-        this mesh; any publish failure rolls the whole update back"""
+        """Update a mesh.
+
+        Changing the pre-shared key redistributes it to every allowed gateway
+        on the mesh, and the whole update is rolled back if that fails.
+        """
         mesh = _get_mesh_or_404(mesh_id)
         _require_mesh_ownership(mesh, request.user)
         changing_psk = "psk_b64" in request.data
@@ -479,8 +526,11 @@ class MeshDetailView(APIView):
         return Response(MeshSerializer(updated, context={"viewer_id": request.user.id}).data)
 
     def delete(self, request, mesh_id):
-        """Publishes delete/unreject and, if it doesn't fail,
-        then cascades (DB FK CASCADE) to every device on the mesh."""
+        """Delete a mesh and every device registered on it.
+
+        Its gateways are deregistered from the decoder first, and nothing is
+        removed if that fails.
+        """
         mesh = _get_mesh_or_404(mesh_id)
         _require_mesh_ownership(mesh, request.user)
         gateways = list(mesh.devices.filter(is_gateway=True, is_allowed=True))
@@ -501,7 +551,7 @@ class MeshDetailView(APIView):
 
 
 class MeshDevicesView(APIView):
-    """Every device on this mesh, gateway or node"""
+    """List every device registered on this mesh, gateways and nodes alike."""
 
     permission_classes = [IsVerifiedOwner]
 
@@ -519,12 +569,16 @@ class DeviceListCreateView(APIView):
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request):
-        """Filters:
-        - ?mesh_id=,
-        - ?is_gateway=,
-        - ?is_allowed=,
-        - ?has_postprocessing= what quality_worker uses
-        to find devices with a blueprint attached"""
+        """List the caller's registered devices, or every device for a superuser.
+
+        Args:
+            mesh_id: Restrict to devices on one mesh.
+            is_gateway: Restrict to gateways, or to plain nodes when false.
+            is_allowed: Restrict to allowed registrations, or to rejected ones
+                when false.
+            has_postprocessing: Restrict to devices with a blueprint attached,
+                or to those without one when false.
+        """
         qs = Device.objects.select_related("mesh")
         qs = qs.all() if request.user.is_superuser else qs.filter(mesh__owner=request.user)
         mesh_id = request.query_params.get("mesh_id")
@@ -540,7 +594,12 @@ class DeviceListCreateView(APIView):
         return Response(DeviceReadSerializer(qs, many=True, context={"viewer_id": request.user.id}).data)
 
     def post(self, request):
-        """Only the mesh owner may register a device. A device needs to be marked first as is_allowed = False to be taken over to another mesh."""
+        """Register a device on a mesh the caller owns.
+
+        Registering a gateway authorizes its traffic to be decoded. A
+        device can only move to another mesh once its current registration has
+        been disallowed.
+        """
         input_serializer = DeviceCreateSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
         data = input_serializer.validated_data
@@ -582,13 +641,18 @@ class DeviceDetailView(APIView):
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request, id):
+        """Return one registered device."""
         device = _get_device_or_404(id)
         _require_mesh_ownership(device.mesh, request.user)
         return Response(DeviceReadSerializer(device, context={"viewer_id": request.user.id}).data)
 
     def put(self, request, id):
-        """is_allowed, location, and nodeinfo follow the sticky-override
-        model"""
+        """Update a registered device.
+
+        Position and identity fields are filled in from what the device reports
+        until they are set here, after which the values given take precedence.
+        Disallowing a gateway stops its traffic being decoded.
+        """
         device = _get_device_or_404(id)
         _require_mesh_ownership(device.mesh, request.user)
         changing_allowed = "is_allowed" in request.data
@@ -653,7 +717,11 @@ class DeviceDetailView(APIView):
         return Response(DeviceReadSerializer(updated, context={"viewer_id": request.user.id}).data)
 
     def delete(self, request, id):
-        """Publishes the matching Kafka delete/unreject first"""
+        """Delete a device registration.
+
+        The device is deregistered from the decoder first, and the record is
+        kept if that fails.
+        """
         device = _get_device_or_404(id)
         _require_mesh_ownership(device.mesh, request.user)
         publisher = get_publisher()
@@ -669,8 +737,10 @@ class DeviceDetailView(APIView):
 
 
 class DeviceTelemetryVariantsView(APIView):
-    """Which telemetry types this device has been seen reporting.
-    This view is read-only and fields auto-discovered."""
+    """List the telemetry types this device has been seen reporting.
+
+    Entries appear on their own as telemetry arrives and cannot be edited here.
+    """
 
     permission_classes = [IsVerifiedOwner]
 
@@ -682,8 +752,10 @@ class DeviceTelemetryVariantsView(APIView):
 
 
 class DeviceMeasurementsView(APIView):
-    """Every channel this device actually produces.
-    This view is read-only and fields auto-discovered."""
+    """List the measurement channels this device produces, measured and computed alike.
+
+    Entries appear on their own as telemetry arrives and cannot be edited here.
+    """
 
     permission_classes = [IsVerifiedOwner]
 
@@ -731,26 +803,27 @@ def _get_telemetry_variant_or_404(telemetry_variant_id) -> TelemetryVariant:
 
 
 class MeasurementTypeListCreateView(APIView):
-    """Full CRUD on the shared catalog
-    GET is open to any verified owner, writes are superuser-only"""
-
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request):
-        """Filters: ?kind=, ?payload_kind=, ?field_name=.
+        """List the shared catalog of measurement types and their units.
 
-        `telemetry:<variant>` for real sensor fields
-        `derived:<blueprint>` for blueprint outputs
+        Sensor fields are named `telemetry:<variant>` and blueprint outputs
+        `derived:<blueprint>`.
 
-        `?kind=derived` ("just the computed channels") is the common case
-        `?payload_kind=telemetry:environment_metrics` ("just the env telemetry channels")
-        `?payload_kind=derived:<blueprint>` ("just the derived outputs of a blueprint")
+        Args:
+            kind: Restrict to one namespace, such as `telemetry`, `derived` or
+                `quality`.
+            payload_kind: Restrict to one exact payload kind, such as
+                `telemetry:environment_metrics`.
+            field_name: Restrict to one field name, such as `temperature`.
         """
         return Response(
             MeasurementTypeReadSerializer(filter_measurement_types(MeasurementType.objects.all(), request), many=True).data
         )
 
     def post(self, request):
+        """Add a measurement type to the shared catalog. Superusers only."""
         _require_superuser(request)
         serializer = MeasurementTypeCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -768,10 +841,11 @@ class MeasurementTypeDetailView(APIView):
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request, measurement_type_id):
+        """Return one measurement type."""
         return Response(MeasurementTypeReadSerializer(_get_measurement_type_or_404(measurement_type_id)).data)
 
     def put(self, request, measurement_type_id):
-        """payload_kind/field_name are fixed after creation"""
+        """Update a measurement type. Its payload kind and field name are fixed. Superusers only."""
         _require_superuser(request)
         measurement_type = _get_measurement_type_or_404(measurement_type_id)
         serializer = MeasurementTypeUpdateSerializer(measurement_type, data=request.data, partial=True)
@@ -780,18 +854,18 @@ class MeasurementTypeDetailView(APIView):
         return Response(MeasurementTypeReadSerializer(updated).data)
 
     def delete(self, request, measurement_type_id):
+        """Remove a measurement type from the catalog. Superusers only."""
         _require_superuser(request)
         _get_measurement_type_or_404(measurement_type_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class TelemetryVariantListCreateView(APIView):
-    """GET only
-    TelemetryVariants are always created dynamically, either by
-    sensor discovery (consume_sensor_discovery.py) or manage.py
-    seed_measurement_catalog. See PUT /telemetry-variants/{id}
-    for curation.
-    Open to any verified owner."""
+    """List the known telemetry variants, such as device or environment metrics.
+
+    Variants are registered automatically as devices report them, so there is
+    no way to create one here.
+    """
 
     permission_classes = [IsVerifiedOwner]
 
@@ -803,10 +877,15 @@ class TelemetryVariantDetailView(APIView):
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request, telemetry_variant_id):
+        """Return one telemetry variant."""
         return Response(TelemetryVariantReadSerializer(_get_telemetry_variant_or_404(telemetry_variant_id)).data)
 
     def put(self, request, telemetry_variant_id):
-        """payload_kind is fixed after creation"""
+        """Update a telemetry variant. Its payload kind is fixed. Superusers only.
+
+        The expected reading interval set here is used to judge whether devices
+        reporting this variant are publishing as often as they should.
+        """
         _require_superuser(request)
         telemetry_variant = _get_telemetry_variant_or_404(telemetry_variant_id)
         serializer = TelemetryVariantUpdateSerializer(telemetry_variant, data=request.data, partial=True)
@@ -818,15 +897,14 @@ class TelemetryVariantDetailView(APIView):
         return Response(TelemetryVariantReadSerializer(updated).data)
 
     def delete(self, request, telemetry_variant_id):
+        """Delete a telemetry variant. Superusers only."""
         _require_superuser(request)
         _get_telemetry_variant_or_404(telemetry_variant_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class TelemetryVariantMeasurementsView(APIView):
-    """GET /telemetry-variants/{id}/measurement-types
-    Open to any verified owner
-    Links themselves are created by manage.py seed_measurement_catalog."""
+    """List the measurement types reported under this telemetry variant."""
 
     permission_classes = [IsVerifiedOwner]
 
@@ -854,16 +932,18 @@ def _get_telemetry_variant_measurement_or_404(telemetry_variant_measurement_id) 
 
 
 class TelemetryVariantMeasurementDetailView(APIView):
-    """PUT /telemetry-variant-measurements/{id}
-    Change plausible value range, superuser-only."""
-
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request, telemetry_variant_measurement_id):
+        """Return one measurement channel, including its plausible value range."""
         link = _get_telemetry_variant_measurement_or_404(telemetry_variant_measurement_id)
         return Response(TelemetryVariantMeasurementReadSerializer(link).data)
 
     def put(self, request, telemetry_variant_measurement_id):
+        """Set the plausible value range for a channel. Superusers only.
+
+        Readings outside the range are flagged by the quality checks.
+        """
         _require_superuser(request)
         link = _get_telemetry_variant_measurement_or_404(telemetry_variant_measurement_id)
         serializer = TelemetryVariantMeasurementUpdateSerializer(link, data=request.data, partial=True)
@@ -874,10 +954,11 @@ class TelemetryVariantMeasurementDetailView(APIView):
 
 
 class AlgorithmListView(APIView):
-    """GET /algorithms
-    Algorithms are the postprocessing functions available to blueprint
-    steps, with their declared inputs/outputs/params/mode.
-    Read-open to any verified owner"""
+    """List the functions available to postprocessing steps.
+
+    Each entry declares the inputs it needs, the outputs it produces and the
+    parameters it accepts.
+    """
 
     permission_classes = [IsVerifiedOwner]
 
@@ -902,6 +983,7 @@ class PostprocessingBlueprintListCreateView(APIView):
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request):
+        """List the caller's postprocessing blueprints, or every one for a superuser."""
         qs = (
             PostprocessingBlueprint.objects.all()
             if request.user.is_superuser
@@ -910,6 +992,8 @@ class PostprocessingBlueprintListCreateView(APIView):
         return Response(PostprocessingBlueprintSerializer(qs.prefetch_related("steps"), many=True).data)
 
     def post(self, request):
+        """Create a postprocessing blueprint, an ordered set of steps that compute
+        new channels from a device's readings."""
         serializer = PostprocessingBlueprintSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -923,13 +1007,17 @@ class PostprocessingBlueprintDetailView(APIView):
     permission_classes = [IsVerifiedOwner]
 
     def get(self, request, blueprint_id):
+        """Return one postprocessing blueprint and its steps."""
         blueprint = _get_blueprint_or_404(blueprint_id)
         _require_blueprint_ownership(blueprint, request.user)
         return Response(PostprocessingBlueprintSerializer(blueprint).data)
 
     def put(self, request, blueprint_id):
-        """Passing `steps` replaces the whole ordered list; while omitting it leaves
-        the existing steps alone."""
+        """Update a postprocessing blueprint.
+
+        Supplying `steps` replaces the whole ordered list; omitting it leaves
+        the existing steps untouched.
+        """
         blueprint = _get_blueprint_or_404(blueprint_id)
         _require_blueprint_ownership(blueprint, request.user)
         serializer = PostprocessingBlueprintSerializer(blueprint, data=request.data, partial=True)
@@ -941,8 +1029,11 @@ class PostprocessingBlueprintDetailView(APIView):
         return Response(PostprocessingBlueprintSerializer(updated).data)
 
     def delete(self, request, blueprint_id):
-        """Devices pointing at this blueprint keep working
-        FK is SET_NULL, so they just stop being postprocessed."""
+        """Delete a postprocessing blueprint.
+
+        Devices using it keep recording telemetry and simply stop producing
+        computed channels.
+        """
         blueprint = _get_blueprint_or_404(blueprint_id)
         _require_blueprint_ownership(blueprint, request.user)
         blueprint.delete()
