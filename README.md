@@ -33,11 +33,13 @@ MQTT ──> bridge ──> mesh.telemetry.raw.v1 ──> decode/decrypt ──>
 
 ```bash
 cp env.example .env    # then see docs/README.md#quick-start
-docker compose --profile full up -d
+docker compose up -d               # lite by default (COMPOSE_PROFILES in env.example)
+docker compose --profile full up -d   # or the full stack: Flink stream tier, S3 archive, kafbat-ui
 ```
 
 **Note**: For iterations on protobufs, install `meshtastic` locally as editable and
 build protobufs locally — see [`scripts/regen-protos.sh`](meshtastic_things/scripts/regen-protos.sh).
 
-**Warning**: Nothing reaches InfluxDB until a mesh has a **registered gateway** — that
-registration is the gate that authorizes decoding.
+**Warning**: Nothing reaches InfluxDB until a mesh has a **registered gateway** (registration authorizes decoding).
+
+
