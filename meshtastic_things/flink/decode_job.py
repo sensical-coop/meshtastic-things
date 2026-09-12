@@ -45,15 +45,26 @@ GATEWAY_KEY_STATE = MapStateDescriptor("gateway-keys", Types.STRING(), Types.STR
 NODE_REJECTED_STATE = MapStateDescriptor("node-rejections", Types.STRING(), Types.STRING())
 
 
-def _discovered_fields(payload_kind: str, payload: dict) -> list[str]:
-    """telemetry:<variant> only, numeric leaf fields only."""
-    if not payload_kind.startswith("telemetry:"):
-        return []
-    variant = payload_kind.split(":", 1)[1]
-    sub = payload.get(variant)
-    if not isinstance(sub, dict):
-        return []
-    return [k for k, v in sub.items() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+class _BroadcastGatewayState:
+    """Adapts Flink's MapState for decode_packet"""
+
+    def __init__(self, map_state):
+        self._map_state = map_state
+
+    def get(self, key):
+        if not self._map_state.contains(key):
+            return None
+        return json.loads(self._map_state.get(key))
+
+
+class _BroadcastRejectedSet:
+    """Adapts Flink's MapState to the decode_packet checks"""
+
+    def __init__(self, map_state):
+        self._map_state = map_state
+
+    def __contains__(self, key):
+        return self._map_state.contains(key)
 
 
 class PacketKeySelector(KeySelector):
@@ -78,9 +89,9 @@ class DecodeWithBroadcastKey(KeyedBroadcastProcessFunction):
     node isn't rejected."""
 
     def open(self, runtime_context):
-        from common import codec
+        from common import decode
 
-        self._codec = codec
+        self._decode = decode
 
     def process_element(self, value: str, ctx):
         gateway_state_map = ctx.get_broadcast_state(GATEWAY_KEY_STATE)
@@ -90,75 +101,22 @@ class DecodeWithBroadcastKey(KeyedBroadcastProcessFunction):
             return
 
         raw = value.encode(RAW_BYTES_CHARSET)
+        rejected_state = ctx.get_broadcast_state(NODE_REJECTED_STATE)
         try:
-            gateway_state = json.loads(gateway_state_map.get(current_key))
-        except Exception:
-            _udf_log_exception(f"Failed to parse gateway state for {current_key}")
-            return
-        key_b64 = gateway_state.get("psk_b64")
-        mesh_id = gateway_state.get("mesh_id")
-        key_bytes = self._codec.decode_psk(key_b64) if key_b64 else None
-
-        try:
-            node_id = getattr(self._codec.parse_service_envelope(raw), "from")
-        except Exception:
-            _udf_log_exception("Failed to parse packet header")
-            return
-        if mesh_id:
-            rejected_state = ctx.get_broadcast_state(NODE_REJECTED_STATE)
-            if rejected_state.contains(f"{mesh_id}:{node_id}"):
-                _udf_log(f"Dropping packet from rejected node: mesh_id={mesh_id} device_id={node_id}")
-                return
-
-        try:
-            decoded = self._codec.decode_message(raw, key_bytes)
+            events = self._decode.decode_packet(
+                raw, _BroadcastGatewayState(gateway_state_map), _BroadcastRejectedSet(rejected_state)
+            )
         except Exception:
             _udf_log_exception("Failed to decode packet")
             return
-        if decoded is None:
+        if events is None:
             return
-        if mesh_id:
-            # Tag with mesh_id
-            decoded["mesh_id"] = mesh_id
 
-        yield json.dumps({"kind": "decoded", "payload": decoded})
-        if mesh_id:
-            # Node is allowed on first sighting
-            sighting = {
-                "key": f"{mesh_id}:{decoded['node_id']}",
-                "mesh_id": mesh_id,
-                "device_id": decoded["node_id"],
-                "op": "upsert",
-            }
-            # Opportunistic enrichment.
-            payload = decoded["payload"]
-            if decoded["payload_kind"] == "position":
-                lat_i, lon_i = payload.get("latitude_i"), payload.get("longitude_i")
-                if lat_i is not None and lon_i is not None:
-                    sighting["latitude"] = lat_i / 1e7
-                    sighting["longitude"] = lon_i / 1e7
-            elif decoded["payload_kind"] == "nodeinfo":
-                for src_field, sighting_key in (
-                    ("long_name", "name"),
-                    ("short_name", "short_name"),
-                    ("hw_model", "hardware_type"),
-                    ("role", "role"),
-                ):
-                    if payload.get(src_field):
-                        sighting[sighting_key] = payload[src_field]
-            yield json.dumps({"kind": "sighting", "payload": sighting})
-
-            # Sensor/Measurement discovery.
-            fields = _discovered_fields(decoded["payload_kind"], payload)
-            if fields:
-                discovery = {
-                    "mesh_id": mesh_id,
-                    "device_id": decoded["node_id"],
-                    "payload_kind": decoded["payload_kind"],
-                    "fields": fields,
-                    "op": "upsert",
-                }
-                yield json.dumps({"kind": "discovery", "payload": discovery})
+        yield json.dumps({"kind": "decoded", "payload": events["decoded"]})
+        if "sighting" in events:
+            yield json.dumps({"kind": "sighting", "payload": events["sighting"]})
+        if "discovery" in events:
+            yield json.dumps({"kind": "discovery", "payload": events["discovery"]})
 
     def process_broadcast_element(self, value: str, ctx):
         try:

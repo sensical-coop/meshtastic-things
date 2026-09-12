@@ -25,7 +25,9 @@ x-flink-client-properties: &flink-client-properties |
   rest.address: jobmanager
 
 services:
+  # full-only
   jobmanager:
+    profiles: ["full"]
     mem_limit: 1600m
     <<: *flink-image
     container_name: jobmanager
@@ -44,6 +46,7 @@ services:
       start_period: 30s
 
   taskmanager:
+    profiles: ["full"]
     mem_limit: 3600m
     <<: *flink-image
     container_name: taskmanager
@@ -63,6 +66,7 @@ services:
       start_period: 30s
 
   flink-job:
+    profiles: ["full"]
     mem_limit: 1024m
     container_name: flink-job
     env_file: "../.env"

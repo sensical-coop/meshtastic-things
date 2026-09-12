@@ -57,6 +57,10 @@ services:
     ports: !override
       - ${S3_WRITER__HEALTHCHECK_PORT}:${S3_WRITER__HEALTHCHECK_PORT}
 
+  decode_consumer:
+    ports: !override
+      - ${DECODE_CONSUMER__HEALTHCHECK_PORT}:${DECODE_CONSUMER__HEALTHCHECK_PORT}
+
   key_management_device_consumer:
     environment:
       DJANGO_SETTINGS_MODULE: keyapi_project.settings.dev

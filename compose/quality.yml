@@ -5,9 +5,10 @@ x-quality-worker-image: &quality-worker-image
     dockerfile: quality_worker/Dockerfile
 
 services:
-  # full-only: batch data-quality checks over InfluxDB history
+  # full, or opt-in for lite: batch data-quality checks over InfluxDB
+  # `--profile lite --profile quality`
   quality_worker:
-    profiles: ["full"]
+    profiles: ["full", "quality"]
     mem_limit: 512m
     container_name: quality-worker
     <<: *quality-worker-image
@@ -27,7 +28,7 @@ services:
 
   # Beat scheduler
   quality_worker_beat:
-    profiles: ["full"]
+    profiles: ["full", "quality"]
     mem_limit: 256m
     container_name: quality-worker-beat
     <<: *quality-worker-image

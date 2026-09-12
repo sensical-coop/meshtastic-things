@@ -48,6 +48,31 @@ services:
       retries: 5
       start_period: 30s
 
+  # lite-only
+  decode_consumer:
+    profiles: ["lite"]
+    mem_limit: 256m
+    container_name: decode-consumer
+    <<: *pipeline-image
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+      key_management_api:
+        condition: service_healthy
+    env_file: "../.env"
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${DECODE_CONSUMER__HEALTHCHECK_PORT}:${DECODE_CONSUMER__HEALTHCHECK_PORT}
+    command: ["decode_consumer"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${DECODE_CONSUMER__HEALTHCHECK_PORT}/health"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
   # full-only: the S3/Parquet archive
   s3_writer:
     profiles: ["full"]
