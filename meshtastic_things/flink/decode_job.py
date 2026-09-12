@@ -34,6 +34,10 @@ def _udf_log(message: str) -> None:
 def _udf_log_exception(message: str) -> None:
     print(f"{message}\n{traceback.format_exc()}")
 
+
+def _udf_log_drop(reason: str) -> None:
+    print(f"Dropping packet: {reason}")
+
 # SimpleStringSchema decodes raw bytes with a Charset
 # UTF-8 corrupts protobuf packets, so we use ISO-8859-1
 RAW_BYTES_CHARSET = "ISO-8859-1"
@@ -104,7 +108,10 @@ class DecodeWithBroadcastKey(KeyedBroadcastProcessFunction):
         rejected_state = ctx.get_broadcast_state(NODE_REJECTED_STATE)
         try:
             events = self._decode.decode_packet(
-                raw, _BroadcastGatewayState(gateway_state_map), _BroadcastRejectedSet(rejected_state)
+                raw,
+                _BroadcastGatewayState(gateway_state_map),
+                _BroadcastRejectedSet(rejected_state),
+                on_drop=_udf_log_drop,
             )
         except Exception:
             _udf_log_exception("Failed to decode packet")

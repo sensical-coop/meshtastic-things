@@ -126,7 +126,12 @@ class DecodeConsumer(object):
             for topic_partition, records in messages.items():
                 for record in records:
                     try:
-                        events = decode.decode_packet(record.value, self.gateway_state, self.rejected_nodes)
+                        events = decode.decode_packet(
+                            record.value,
+                            self.gateway_state,
+                            self.rejected_nodes,
+                            on_drop=lambda reason: log.debug("Dropping packet", reason=reason),
+                        )
                     except Exception as e:
                         # Not retryable - a malformed record won't decode differently next time.
                         log.exception("Failed to decode packet", exc_info=e)
