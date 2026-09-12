@@ -63,8 +63,11 @@ class TimeseriesView(APIView):
     Args:
         measurement: Measurement to read, for example `environment_metrics`. Required.
         field: Single field within the measurement. Defaults to every field.
-        start: Start of the range, as a relative duration. Defaults to `-1h`.
-        stop: End of the range, or `now()`. Defaults to `now()`.
+        start: Start of the range, as a relative duration such as `-24h`, a date
+            such as `2026-09-01`, or a timestamp such as `2026-09-01T13:45:00Z`.
+            Defaults to `-1h`.
+        stop: End of the range, in the same forms as `start`, or `now()`.
+            Defaults to `now()`.
         window: Bucket size to downsample into, for example `6h`. Off by default.
         agg: Aggregate applied to each bucket, one of `mean`, `max`, `min`,
             `last`, `first`, `sum` or `count`. Defaults to `mean` and applies
@@ -102,7 +105,8 @@ class LatestView(APIView):
 
     Args:
         measurement: Restrict to one measurement. Defaults to every measurement.
-        lookback: How far back to search for a value. Defaults to `-30d`.
+        lookback: How far back to search for a value, as a relative duration, a
+            date or a timestamp. Defaults to `-30d`.
     """
 
     def get(self, request, mesh_id, node_id):
@@ -145,8 +149,11 @@ class MetricsView(APIView):
     device.
 
     Args:
-        start: Start of the range, as a relative duration. Defaults to `-1h`.
-        stop: End of the range, or `now()`. Defaults to `now()`.
+        start: Start of the range, as a relative duration such as `-24h`, a date
+            such as `2026-09-01`, or a timestamp such as `2026-09-01T13:45:00Z`.
+            Defaults to `-1h`.
+        stop: End of the range, in the same forms as `start`, or `now()`.
+            Defaults to `now()`.
     """
 
     def get(self, request, mesh_id, node_id):

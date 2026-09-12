@@ -2,9 +2,15 @@
 """
 import re
 import uuid
+from datetime import datetime, timezone
 
 _DURATION_RE = re.compile(r"^-?\d+(ms|s|m|h|d|w|mo|y)$")
 _IDENT_RE = re.compile(r"^[A-Za-z0-9_:.\-]+$")
+# A calendar date, optionally with a time and a UTC offset.
+_ABSOLUTE_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}"
+    r"(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$"
+)
 ALLOWED_AGG = {"mean", "max", "min", "last", "first", "sum", "count"}
 
 
@@ -23,10 +29,41 @@ def validate_mesh_id(value: str) -> str:
         raise ValueError(f"Invalid mesh_id: {value!r}")
 
 
+def _absolute_bound(value: str) -> str | None:
+    """Canonical UTC timestamp for a date or datetime, or None if it is neither.
+
+    The result is rebuilt from the parsed value rather than passed through, so
+    nothing of the caller's text reaches the query.
+    """
+    if not _ABSOLUTE_RE.match(value):
+        return None
+    normalized = f"{value[:-1]}+00:00" if value.endswith("Z") else value
+    try:
+        moment = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        # A bare date or a time without an offset is read as UTC.
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def validate_range_bound(value: str, name: str) -> str:
-    if value == "now()" or _DURATION_RE.match(value or ""):
+    """Accept a relative duration, `now()`, a date, or a datetime.
+
+    Dates and datetimes are returned as a UTC timestamp. A date is taken as
+    midnight, and a datetime without an offset is read as UTC.
+    """
+    value = (value or "").strip()
+    if value == "now()" or _DURATION_RE.match(value):
         return value
-    raise ValueError(f"Invalid {name}: {value!r} (expected a relative duration like -1h, or now())")
+    absolute = _absolute_bound(value)
+    if absolute is not None:
+        return absolute
+    raise ValueError(
+        f"Invalid {name}: {value!r} (expected a relative duration like -1h, now(), "
+        f"a date like 2026-09-01, or a timestamp like 2026-09-01T13:45:00Z)"
+    )
 
 
 def validate_duration(value: str, name: str) -> str:
